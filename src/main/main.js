@@ -1,18 +1,17 @@
-// Electron 메인 프로세스 — 창 생성 + 파일/폴더 열기. 파일 로드 시 frontmatter 를 분리해
-// 렌더러로 본문만 보낸다. (CmdMD 의 review-first = 열면 바로 렌더 프리뷰)
+// Electron 메인 프로세스 — 창 생성 + 파일/폴더 열기. 파일은 원본 HTML 을 그대로
+// 렌더러로 보내고, 렌더러가 <iframe srcdoc> 으로 무손상 렌더한다. (spec-html 목업 전용 뷰어)
 
 'use strict';
 
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const fm = require('../core/frontmatter');
 const vault = require('../core/vault-detect');
 
 // 다중 창 — 전역 단일 win 을 버리고 창별 상태를 webContents.id 로 격리한다.
 //   pendingFiles   : 렌더러 준비 전 보류한 "이 창에서 열 파일" (더블클릭/연결 프로그램/새 창으로 열기)
 //   pendingFolders : 새 창이 물려받을 폴더 루트 (창을 열 때 사이드바 트리를 같이 넘기기)
-//   lastFolderRoots: 각 창이 마지막으로 연 폴더 (위키링크 노트 검색 범위 보강 — 창마다 독립)
+//   lastFolderRoots: 각 창이 마지막으로 연 폴더 (창마다 독립)
 // 대상 창은 IPC 는 event.sender, 메뉴는 focusedWindow 로 특정한다.
 // 방문 기록(뒤로/앞으로)은 렌더러가 탭별로 소유 — 메인은 무상태 문서 서비스.
 const pendingFiles = new Map();
@@ -123,46 +122,29 @@ function createWindow(open) {
 	return w;
 }
 
-// frontmatter 의 FrontmatterValue 를 렌더러에 보낼 평문 형태로 직렬화
-function serializeFrontmatter(frontmatter) {
-	if (!frontmatter) return null;
-	const custom = {};
-	for (const [k, v] of Object.entries(frontmatter.custom || {})) {
-		custom[k] = v && typeof v.displayString === 'string' ? v.displayString : String(v);
-	}
-	return {
-		title: frontmatter.title || null,
-		date: frontmatter.date ? String(frontmatter.date) : null,
-		tags: frontmatter.tags || [],
-		aliases: frontmatter.aliases || [],
-		cssclass: frontmatter.cssclass || null,
-		custom,
-	};
-}
-
 // 더블클릭/"연결 프로그램"으로 넘어온 파일 경로를 argv 에서 안전 추출.
-//   dev  : electron . "C:\x.md"  -> argv = [electron, '.', 'C:\x.md']
-//   배포 : "Dong Dong Spec Viewer.exe" "C:\x.md"   -> argv = [exe, 'C:\x.md']
-// argv[0] 은 실행 파일(.md 로 안 끝남)이라 i=1 부터 훑고, 플래그/'.'/존재하지 않는 경로는 건너뛴다.
+//   dev  : electron . "C:\x.html"  -> argv = [electron, '.', 'C:\x.html']
+//   배포 : "Dong Dong Spec Viewer.exe" "C:\x.html"   -> argv = [exe, 'C:\x.html']
+// argv[0] 은 실행 파일(.html 로 안 끝남)이라 i=1 부터 훑고, 플래그/'.'/존재하지 않는 경로는 건너뛴다.
 // (dev/배포 분기 없이 확장자 + 실제 파일 존재로 판정 — 패키지 환경 argv 변형에도 견고)
 function fileArgFrom(argv) {
 	for (let i = 1; i < argv.length; i++) {
 		const a = argv[i];
 		if (!a || a.startsWith('-') || a === '.') continue;
-		if (/\.(md|markdown|mdown|txt)$/i.test(a)) {
+		if (/\.html?$/i.test(a)) {
 			try {
 				if (fs.statSync(a).isFile()) return a;
 			} catch (_) {
-				return a; // stat 실패해도 확장자 매칭이면 일단 시도 (readDocPayload 가 에러 처리)
+				return a; // stat 실패해도 확장자 매칭이면 일단 시도 (readHtmlPayload 가 에러 처리)
 			}
 		}
 	}
 	return null;
 }
 
-// 문서 서비스 — 파일을 읽어 frontmatter 분리 + 원본 raw 를 request/response 로 돌려준다.
-// (방문 기록은 렌더러가 탭별로 소유하므로 메인은 무상태. 열림 시 최근 목록만 갱신.)
-function readDocPayload(filePath) {
+// 문서 서비스 — 파일을 읽어 원본 HTML 을 request/response 로 그대로 돌려준다.
+// (frontmatter 분리·마크다운 변환 없음 — iframe srcdoc 으로 원본 그대로 렌더. 열림 시 최근 목록만 갱신.)
+function readHtmlPayload(filePath) {
 	let text;
 	try {
 		text = fs.readFileSync(filePath, 'utf8');
@@ -170,13 +152,10 @@ function readDocPayload(filePath) {
 		return { filePath, exists: false, error: e.message };
 	}
 	pushRecent(filePath);
-	const { frontmatter, body } = fm.parse(text);
 	return {
 		filePath,
 		exists: true,
-		frontmatter: serializeFrontmatter(frontmatter),
-		body,
-		raw: text, // 편집 모드용 원본 전체(frontmatter 포함) — parse/serialize 안 거쳐 무손실
+		raw: text, // 원본 HTML 전체 — iframe srcdoc 으로 무손상 렌더 (주석 왕복은 M5)
 	};
 }
 
@@ -185,19 +164,19 @@ function sendOpenPath(targetWin, filePath) {
 	if (targetWin && !targetWin.isDestroyed() && filePath) targetWin.webContents.send('open-path', filePath);
 }
 
-async function openMarkdownFile() {
+async function openHtmlFile() {
 	const target = focusedOrAnyWindow();
 	const res = await dialog.showOpenDialog(target || undefined, {
 		properties: ['openFile'],
-		filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'txt'] }],
+		filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
 	});
 	if (res.canceled || !res.filePaths[0]) return;
 	sendOpenPath(target, res.filePaths[0]);
 }
 
 // ---- 폴더 트리 (사이드바에서 클릭 탐색) -----------------------------------
-// 폴더를 골라 그 아래 .md 트리를 만들어 렌더러로 보낸다. .md 가 없는 폴더는 접는다.
-const MD_RE = /\.(md|markdown|mdown)$/i;
+// 폴더를 골라 그 아래 .html 트리를 만들어 렌더러로 보낸다. .html 이 없는 폴더는 접는다.
+const HTML_RE = /\.html?$/i;
 const TREE_SKIP_DIR = new Set(['.obsidian', '.git', 'node_modules', '.trash']);
 
 // dir 이하를 재귀로 훑어 { type, name, path, children } 노드 배열을 만든다 (budget 으로 폭주 방지).
@@ -216,7 +195,7 @@ function buildTree(dir, budget) {
 		if (ent.isDirectory()) {
 			if (TREE_SKIP_DIR.has(ent.name.toLowerCase())) continue;
 			dirs.push(ent.name);
-		} else if (MD_RE.test(ent.name)) {
+		} else if (HTML_RE.test(ent.name)) {
 			files.push(ent.name);
 		}
 	}
@@ -234,7 +213,7 @@ function buildTree(dir, budget) {
 }
 
 // 폴더 선택 다이얼로그 -> 트리 payload (취소 시 null). 요청 창을 다이얼로그 부모로,
-// 그 창의 lastFolderRoot 를 갱신한다 (senderId = 요청 창 webContents.id, 없으면 전역 폴백 없음).
+// 그 창의 lastFolderRoot 를 갱신한다 (senderId = 요청 창 webContents.id).
 async function pickFolder(parentWin, senderId) {
 	const res = await dialog.showOpenDialog(parentWin || undefined, { properties: ['openDirectory'] });
 	if (res.canceled || !res.filePaths[0]) return null;
@@ -251,7 +230,7 @@ async function openFolderFromMenu() {
 	if (payload && !target.isDestroyed()) target.webContents.send('folder-tree', payload);
 }
 
-// 설치된 Obsidian 볼트를 감지해 포커스 창으로 (라우터 UI 의 출발점)
+// 설치된 Obsidian 볼트를 감지해 포커스 창으로 (사이드바 "내 볼트" 목록의 출발점)
 function reportDetectedVaults() {
 	const target = focusedOrAnyWindow();
 	if (!target) return;
@@ -270,7 +249,7 @@ function buildMenu() {
 					else createWindow();
 				} },
 				{ type: 'separator' },
-				{ label: '열기…', accelerator: 'CmdOrCtrl+O', click: openMarkdownFile },
+				{ label: '열기…', accelerator: 'CmdOrCtrl+O', click: openHtmlFile },
 				{ label: '폴더 열기…', accelerator: 'CmdOrCtrl+Shift+O', click: openFolderFromMenu },
 				{ label: 'Obsidian 볼트 감지', click: reportDetectedVaults },
 				{ type: 'separator' },
@@ -327,55 +306,6 @@ ipcMain.handle('open-new-window', (_e, opts) => {
 	return { ok: true };
 });
 
-// ---- 이미지 임베드 해석 (![[img.png]]) -------------------------------------
-// 렌더러는 fs 접근이 없으므로, 이미지 파일을 메인이 찾아 data URL 로 돌려준다.
-// 노트 임베드(![[노트]])는 이미지가 아니라서 여기서 null → 렌더러가 링크로 처리.
-const IMG_MIME = {
-	'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-	'.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp',
-};
-
-// docPath 가 속한 감지된 볼트 루트를 반환 (가장 깊게 매칭되는 볼트). 없으면 null.
-function vaultRootFor(docPath) {
-	try {
-		if (!docPath) return null;
-		const norm = path.resolve(docPath).toLowerCase();
-		return vault
-			.detectedVaults()
-			.filter((v) => v.path && norm.startsWith(path.resolve(v.path).toLowerCase() + path.sep))
-			.sort((a, b) => b.path.length - a.path.length)
-			.map((v) => v.path)[0] || null;
-	} catch (_) {
-		return null;
-	}
-}
-
-// root 이하에서 파일명이 일치하는 이미지를 BFS 로 검색 (.obsidian/.git/node_modules 제외, budget 한도).
-function findImageUnder(root, baseName, budget) {
-	const target = baseName.toLowerCase();
-	const stack = [root];
-	while (stack.length && budget.n > 0) {
-		const dir = stack.pop();
-		let entries;
-		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
-		} catch (_) {
-			continue;
-		}
-		for (const ent of entries) {
-			if (budget.n-- <= 0) break;
-			if (ent.isDirectory()) {
-				const n = ent.name.toLowerCase();
-				if (n === '.obsidian' || n === '.git' || n === 'node_modules' || n === '.trash') continue;
-				stack.push(path.join(dir, ent.name));
-			} else if (ent.name.toLowerCase() === target) {
-				return path.join(dir, ent.name);
-			}
-		}
-	}
-	return null;
-}
-
 // 사이드바 "폴더 열기" 버튼 -> 트리 payload 반환 (요청 창을 다이얼로그 부모 + lastFolderRoot 소유자로).
 ipcMain.handle('open-folder', (e) => {
 	const w = BrowserWindow.fromWebContents(e.sender);
@@ -395,10 +325,10 @@ ipcMain.handle('open-folder-path', (e, p) => {
 	}
 });
 
-// 렌더러가 문서 본문을 요청 (트리·최근·위키링크·드롭·open-path 신호의 실제 로드 = 탭이 소유).
-ipcMain.handle('read-doc', (_e, p) => {
+// 렌더러가 문서 원본을 요청 (트리·최근·드롭·open-path 신호의 실제 로드 = 탭이 소유).
+ipcMain.handle('read-html', (_e, p) => {
 	if (!p || typeof p !== 'string') return { exists: false, error: '경로 누락' };
-	return readDocPayload(p);
+	return readHtmlPayload(p);
 });
 
 // 최근 목록 초기화(전체 비우기) / 개별 항목 제거 — 저장 후 열린 모든 창에 재전송.
@@ -410,13 +340,13 @@ ipcMain.handle('remove-recent', (_e, p) => {
 	sendRecent(arr);
 	return { ok: true };
 });
-// 이미 열린 문서 재방문 — 재읽기 없이 최근 목록만 최상단으로 갱신(read-doc 을 안 타는 경로 보완).
+// 이미 열린 문서 재방문 — 재읽기 없이 최근 목록만 최상단으로 갱신(read-html 을 안 타는 경로 보완).
 ipcMain.handle('touch-recent', (_e, p) => {
 	if (p && typeof p === 'string' && fs.existsSync(p)) pushRecent(p);
 	return { ok: true };
 });
 
-// ---- 드래그앤드롭 분류 (기능 3·4 공유) -------------------------------------
+// ---- 드래그앤드롭 분류 -------------------------------------------------------
 // 드롭 폴더 스캔이 앱을 얼리지 않도록 위험/초대형 경로를 가른다.
 //   - 드라이브 루트(C:\) : 무조건 위험
 //   - 시스템 폴더(Windows·Program Files) : 자기·하위·상위 모두 위험(거대·민감)
@@ -439,8 +369,8 @@ function isDangerousScanRoot(dir) {
 	return false;
 }
 
-// 드롭된 경로 판별. 폴더면 트리를 push(위험 경로는 확인 다이얼로그), .md 는 kind 만 반환(렌더러가 로드).
-// v1.1 정책 — 첫 항목만 처리, 여러 개 동시 드롭은 렌더러가 안내. buildTree budget 으로 폭주 방지.
+// 드롭된 경로 판별. 폴더면 트리를 push(위험 경로는 확인 다이얼로그), .html 은 kind 만 반환(렌더러가 로드).
+// 첫 항목만 처리, 여러 개 동시 드롭은 렌더러가 안내. buildTree budget 으로 폭주 방지.
 ipcMain.handle('classify-dropped', (e, p) => {
 	try {
 		const target = BrowserWindow.fromWebContents(e.sender); // 드롭 발생 창
@@ -469,157 +399,18 @@ ipcMain.handle('classify-dropped', (e, p) => {
 			if (target && !target.isDestroyed()) target.webContents.send('folder-tree', { root, name: path.basename(root), tree, truncated });
 			return { kind: 'dir', truncated };
 		}
-		if (MD_RE.test(p)) return { kind: 'md', path: p }; // 로드는 렌더러가(편집 중 미저장 보호)
+		if (HTML_RE.test(p)) return { kind: 'html', path: p }; // 로드는 렌더러가
 		return { kind: 'other', path: p };
 	} catch (e) {
 		return { kind: 'error', error: e.message };
 	}
 });
 
-// 뒤로/앞으로는 렌더러가 탭별 방문 기록으로 처리 — 메인 nav 상태·핸들러 제거됨.
-
-// ---- 파일 저장 (편집 모드) -------------------------------------------------
-// 렌더러가 보낸 원본 텍스트를 그대로 디스크에 쓴다 (parse/serialize 미경유 = 무손실).
-// 저장 성공 시 디스크에서 다시 읽어 렌더 — 화면이 실제 저장 결과로 갱신돼 round-trip 을 자가 검증한다.
-ipcMain.handle('save-file', (_e, payload) => {
-	try {
-		const filePath = payload && payload.filePath;
-		const content = payload && typeof payload.content === 'string' ? payload.content : null;
-		if (!filePath || content === null) return { ok: false, error: '경로 또는 내용 누락' };
-		fs.writeFileSync(filePath, content, 'utf8');
-		pushRecent(filePath);
-		return { ok: true }; // 렌더러가 read-doc 로 재읽기 → 읽기 모드 복귀(round-trip 자가 검증)
-	} catch (e) {
-		return { ok: false, error: e.message };
-	}
-});
-
-// 편집 중 미저장 변경 버리기 확인 — 네이티브 모달(버튼 텍스트 '예'/'아니요' 커스텀).
-// 동기(sendSync)로 렌더러의 confirmLeaveEdit 흐름을 단순하게 유지한다.
-// 반환 true='예'(버리고 진행) · false='아니요'(편집 계속).
-ipcMain.on('confirm-discard-sync', (e) => {
-	const target = BrowserWindow.fromWebContents(e.sender);
-	const idx = dialog.showMessageBoxSync(target || undefined, {
-		type: 'warning',
-		buttons: ['예', '아니요'],
-		defaultId: 1, // 기본 포커스 = '아니요' (실수로 Enter 쳐도 편집 유지)
-		cancelId: 1, // Esc = '아니요'
-		noLink: true,
-		title: '편집 취소',
-		message: '저장하지 않은 내용이 있습니다.',
-		detail: '정말 취소하시겠습니까?',
-	});
-	e.returnValue = idx === 0; // '예' 선택 시에만 버린다
-});
-
-// ---- 위키링크/외부링크 이동 -----------------------------------------------
-// root 이하에서 파일명이 일치하는 .md 노트를 BFS 로 검색 (이미지 검색과 같은 제외 규칙).
-function findNoteUnder(root, baseName, budget) {
-	const target = baseName.toLowerCase();
-	const stack = [root];
-	while (stack.length && budget.n > 0) {
-		const dir = stack.pop();
-		let entries;
-		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
-		} catch (_) {
-			continue;
-		}
-		for (const ent of entries) {
-			if (budget.n-- <= 0) break;
-			if (ent.isDirectory()) {
-				if (TREE_SKIP_DIR.has(ent.name.toLowerCase())) continue;
-				stack.push(path.join(dir, ent.name));
-			} else if (ent.name.toLowerCase() === target) {
-				return path.join(dir, ent.name);
-			}
-		}
-	}
-	return null;
-}
-
-// 위키링크 [[노트]] / [[노트#헤딩]] / [[하위/노트]] 를 실제 .md 경로로 해석(로드는 렌더러가).
-// lastRoot = 요청 창이 마지막으로 연 폴더 (창별 폴백 검색 범위).
-function resolveNotePath(rawTarget, docPath, lastRoot) {
-	try {
-		const raw = (rawTarget || '').trim();
-		if (!raw) return null;
-		let target = raw.split('#')[0].split('^')[0].trim().replace(/\\/g, '/');
-		if (!target) return null; // 같은 문서 내 헤딩/블록 링크면 무시
-		const base = path.basename(target);
-		const withExt = /\.(md|markdown|mdown)$/i.test(base) ? base : base + '.md';
-
-		// 1) 문서 폴더 기준 상대경로 직접 시도 (하위 폴더 포함 링크)
-		let found = null;
-		if (docPath) {
-			const rel = path.resolve(path.dirname(docPath), target);
-			const relExt = /\.(md|markdown|mdown)$/i.test(rel) ? rel : rel + '.md';
-			try {
-				if (fs.statSync(relExt).isFile()) found = relExt;
-			} catch (_) {}
-		}
-		// 2) 파일명 BFS — 볼트 루트 → 문서 폴더 → 마지막 연 폴더 순
-		if (!found) {
-			const roots = [];
-			const vr = vaultRootFor(docPath);
-			if (vr) roots.push(vr);
-			if (docPath) roots.push(path.dirname(docPath));
-			if (lastRoot) roots.push(lastRoot);
-			for (const r of roots) {
-				found = findNoteUnder(r, withExt, { n: 20000 });
-				if (found) break;
-			}
-		}
-		return found || null;
-	} catch (_) {
-		return null;
-	}
-}
-ipcMain.handle('resolve-note', (e, payload) =>
-	resolveNotePath(
-		(payload && payload.target) || '',
-		(payload && payload.docPath) || '',
-		lastFolderRoots.get(e.sender.id) || null
-	)
-);
-
-// 외부 URL 을 시스템 기본 브라우저로 연다.
+// 외부 URL 을 시스템 기본 브라우저로 연다 (iframe 내부 링크 네비 가드에서 호출).
 ipcMain.handle('open-external', (_e, url) => {
 	try {
 		if (typeof url === 'string' && /^(https?:|mailto:)/i.test(url)) shell.openExternal(url);
 	} catch (_) {}
-});
-
-ipcMain.handle('resolve-embed', (_e, payload) => {
-	try {
-		const name = ((payload && payload.name) || '').trim();
-		const docPath = (payload && payload.docPath) || '';
-		if (!name) return null;
-		const ext = path.extname(name).toLowerCase();
-		if (!IMG_MIME[ext]) return null; // 이미지 임베드만 해석
-
-		// 1) 절대경로 / 문서 디렉토리 기준 상대경로 우선
-		const direct = [];
-		if (path.isAbsolute(name)) direct.push(name);
-		if (docPath) direct.push(path.resolve(path.dirname(docPath), name));
-		let found = direct.find((p) => {
-			try {
-				return fs.statSync(p).isFile();
-			} catch (_) {
-				return false;
-			}
-		});
-		// 2) 파일명만이면 볼트 루트(없으면 문서 폴더) 재귀 검색
-		if (!found) {
-			const root = vaultRootFor(docPath) || (docPath ? path.dirname(docPath) : null);
-			if (root) found = findImageUnder(root, path.basename(name), { n: 8000 });
-		}
-		if (!found) return null;
-		const buf = fs.readFileSync(found);
-		return `data:${IMG_MIME[ext]};base64,${buf.toString('base64')}`;
-	} catch (_) {
-		return null;
-	}
 });
 
 // 시작 단계 에러를 조용히 삼키지 않고 userData 에 로그로 남긴다 (사용자 PC 진단용).
@@ -631,7 +422,7 @@ function logStartupError(err) {
 	} catch (_) {}
 }
 
-// 단일 인스턴스 — 앱이 떠 있는데 밖에서 다른 .md 를 더블클릭하면 새 프로세스를 띄우지 않고
+// 단일 인스턴스 — 앱이 떠 있는데 밖에서 다른 .html 을 더블클릭하면 새 프로세스를 띄우지 않고
 // 포커스된(없으면 아무) 기존 창에서 열고 포커스한다. lock 획득 실패(=두 번째 인스턴스)면 곧장 종료.
 // (앱 내부 "새 창"과는 별개 — 그건 같은 프로세스에서 BrowserWindow 를 추가로 만든다.)
 const gotLock = app.requestSingleInstanceLock();
