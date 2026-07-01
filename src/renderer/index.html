@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Dong Dong Spec Viewer</title>
+		<!-- 렌더 스택을 로컬 번들로 로드 (인터넷·사내 방화벽 무관). markdown-it / highlight.js / Mermaid 11 / KaTeX +mhchem -->
+		<link rel="stylesheet" href="vendor/highlight/github.min.css" media="(prefers-color-scheme: light)" />
+		<link rel="stylesheet" href="vendor/highlight/github-dark.min.css" media="(prefers-color-scheme: dark)" />
+		<link rel="stylesheet" href="vendor/katex/katex.min.css" />
+		<link rel="stylesheet" href="theme.css" />
+		<script src="vendor/markdown-it.min.js"></script>
+		<script src="vendor/highlight/highlight.min.js"></script>
+		<script src="vendor/mermaid.min.js"></script>
+		<script src="vendor/katex/katex.min.js"></script>
+		<script defer src="vendor/katex/contrib/auto-render.min.js"></script>
+		<script defer src="vendor/katex/contrib/mhchem.min.js"></script>
+	</head>
+	<body>
+		<header id="topbar">
+			<div class="brand">Dong Dong Spec Viewer <span class="badge">Windows · 1.3</span></div>
+			<div id="docpath" class="docpath"></div>
+			<div id="actions" class="actions">
+				<button id="newwin-btn" type="button" title="새 창 — 지금 폴더를 새 창에서 (Ctrl+N)">⧉ 새 창</button>
+				<button id="split-btn" type="button" disabled title="분할 — 활성 문서를 옆 열에 (Ctrl+\)">◫ 분할</button>
+				<button id="edit-btn" type="button" disabled title="편집 (Ctrl+E)">✏ 편집</button>
+				<button id="save-btn" type="button" class="hidden" title="저장 (Ctrl+S)">💾 저장</button>
+				<button id="cancel-btn" type="button" class="hidden" title="취소 (Esc)">취소</button>
+			</div>
+		</header>
+		<div id="layout">
+			<aside id="sidebar">
+				<div class="sb-head">
+					<button id="open-folder-btn" type="button">📁 폴더 열기</button>
+					<div id="sb-root" class="sb-root"></div>
+				</div>
+				<section id="vault-section" class="recent-section hidden">
+					<div class="recent-head"><span>내 Obsidian 볼트</span></div>
+					<ul id="vault-list" class="recent-list"></ul>
+				</section>
+				<section id="recent-section" class="recent-section hidden">
+					<div class="recent-head"><span>최근 파일</span><button id="recent-clear-btn" type="button" title="최근 파일 목록 비우기">초기화</button></div>
+					<ul id="recent-list" class="recent-list"></ul>
+				</section>
+				<nav id="filetree" class="filetree">
+					<div class="tree-empty">폴더를 열면 .md 파일이 트리로 표시됩니다.</div>
+				</nav>
+			</aside>
+			<div id="panes" class="panes"></div>
+		</div>
+		<div id="drop-overlay" class="drop-overlay hidden"><span>여기에 .md 파일이나 폴더를 놓으세요</span></div>
+		<script src="renderer.js"></script>
+	</body>
+</html>

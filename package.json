@@ -1,0 +1,42 @@
+{
+  "name": "dd-spec-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "author": "CMDSPACE",
+  "description": "Dong Dong Spec Viewer for Windows — open spec-html mockups and annotate them with numbered pins, range boxes, and rich-text descriptions, then save as self-contained HTML. Electron app reusing CmdMD's shell, IPC, and build pipeline.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/core.test.js",
+    "dist": "node scripts/build-win.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.3.0"
+  },
+  "devDependencies": {
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "katex": "^0.17.0",
+    "markdown-it": "^14.2.0",
+    "mermaid": "^11.16.0",
+    "rcedit": "^4.0.0"
+  },
+  "build": {
+    "appId": "work.cmdspace.dd-spec-viewer",
+    "productName": "Dong Dong Spec Viewer",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
