@@ -12,10 +12,11 @@
 			<div class="brand">Dong Dong Spec Viewer <span class="badge">Windows · M3</span></div>
 			<div id="docpath" class="docpath"></div>
 			<div id="actions" class="actions">
+				<button id="sidebar-toggle" type="button" title="사이드바 접기/펼치기 (Ctrl+B)">◧ 사이드바</button>
 				<button id="edit-btn" type="button" disabled title="주석 편집 — 클릭 = 핀 · 드래그 = 박스 (Ctrl+E)">✏ 주석 편집</button>
 				<button id="save-btn" type="button" disabled title="주석 저장 — 원본에 주석을 심어 저장 (Ctrl+S) · Shift = 다른 이름으로">💾 저장</button>
 				<button id="newwin-btn" type="button" title="새 창 — 지금 폴더를 새 창에서 (Ctrl+N)">⧉ 새 창</button>
-				<button id="split-btn" type="button" disabled title="분할 — 활성 문서를 옆 열에 (Ctrl+\)">◫ 분할</button>
+				<button id="split-btn" type="button" disabled class="hidden" title="분할 — 활성 문서를 옆 열에 (Ctrl+\)">◫ 분할</button>
 			</div>
 		</header>
 		<div id="layout">
@@ -37,12 +38,14 @@
 				</nav>
 			</aside>
 			<div id="panes" class="panes"></div>
+			<div id="ap-gutter" class="ap-gutter hidden" title="드래그해서 패널 폭 조절"></div>
 			<aside id="annot-panel" class="annot-panel hidden">
 				<div class="ap-head">
 					<span class="ap-title">주석 <b id="ap-count">0</b></span>
 					<div class="ap-head-actions">
 						<button id="ap-import" type="button" class="ap-import hidden" title="spec-html 목업의 요소 설명(APP_DATA)을 핀 초안으로 불러옵니다">✨ 초안 불러오기</button>
 						<label class="ap-pull" title="끄면 삭제해도 뒤 번호가 안 당겨집니다(자동 번호는 현재 값으로 동결)"><input type="checkbox" id="ap-pullback" checked />삭제 시 당김</label>
+						<button id="ap-collapse" type="button" class="ap-collapse" title="주석 패널 접기">✕</button>
 					</div>
 				</div>
 				<ul id="annot-list" class="annot-list"></ul>
@@ -64,7 +67,9 @@
 				</section>
 				<div class="ap-hint">편집 모드 — 목업 클릭 = 핀 · 드래그 = 박스 · 핀 드래그 = 이동<br />행 더블클릭 = 번호 수정 · 행 드래그 = 재정렬 · Delete = 삭제<br />화면 이동(goScreen)은 편집을 끄고 하세요.</div>
 			</aside>
+			<button id="ap-reopen" type="button" class="ap-reopen hidden" title="주석 패널 펼치기">📌 주석</button>
 		</div>
+		<div id="toast" class="toast hidden"></div>
 		<div id="drop-overlay" class="drop-overlay hidden"><span>여기에 .md 파일이나 폴더를 놓으세요</span></div>
 		<!-- core 순수 모듈(UMD) → 오버레이 → 셸 순서 (오버레이가 DDAnchor·DDModel·DDNumbering, 셸이 DDHtmlIO·DDNumbering·DDOverlay 참조) -->
 		<script src="../core/anchor.js"></script>

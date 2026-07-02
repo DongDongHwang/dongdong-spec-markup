@@ -25,6 +25,63 @@ const apdName = document.getElementById('apd-name');
 const apdEditor = document.getElementById('apd-editor');
 const apdSlots = document.getElementById('apd-slots');
 const apdSlotsBtn = document.getElementById('apd-slots-btn');
+const layoutEl = document.getElementById('layout');
+const sidebarToggle = document.getElementById('sidebar-toggle');
+const apGutter = document.getElementById('ap-gutter');
+const apCollapse = document.getElementById('ap-collapse');
+const apReopen = document.getElementById('ap-reopen');
+const toastEl = document.getElementById('toast');
+
+// ---- 토스트 (저장 등 결과 피드백) — 조용한 성공이 "안 됨"으로 오해되던 문제 해소 ----
+let toastTimer = null;
+function showToast(msg, kind) {
+	if (!toastEl) return;
+	toastEl.textContent = msg;
+	toastEl.className = 'toast show' + (kind ? ' ' + kind : '');
+	if (toastTimer) clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => { toastEl.className = 'toast hidden'; }, 2200);
+}
+
+// ---- 레이아웃 접기/리사이즈 (목업이 항상 보이도록) ----
+function toggleSidebar() {
+	if (!layoutEl) return;
+	const off = layoutEl.classList.toggle('sidebar-collapsed');
+	if (sidebarToggle) sidebarToggle.classList.toggle('is-off', off);
+}
+if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+
+function setPanelCollapsed(on) {
+	if (!layoutEl) return;
+	layoutEl.classList.toggle('panel-collapsed', on);
+	// 재열기 버튼은 편집 모드/주석 있을 때 + 접힌 상태에서만
+	const t = activeTab();
+	const relevant = !!(t && t.docPath && (t.editMode || (t.annotations && t.annotations.annotations.length > 0)));
+	if (apReopen) apReopen.classList.toggle('hidden', !(on && relevant));
+}
+if (apCollapse) apCollapse.addEventListener('click', () => setPanelCollapsed(true));
+if (apReopen) apReopen.addEventListener('click', () => setPanelCollapsed(false));
+
+// 주석 패널 폭 드래그 — --ap-width 조절(최소 200 / 최대 창의 60%).
+if (apGutter) {
+	apGutter.addEventListener('mousedown', (e) => {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startW = annotPanel.getBoundingClientRect().width;
+		document.body.classList.add('ap-resizing');
+		const onMove = (ev) => {
+			let w = startW + (startX - ev.clientX); // 왼쪽 거터라 반대 방향
+			w = Math.max(200, Math.min(window.innerWidth * 0.6, w));
+			document.documentElement.style.setProperty('--ap-width', w + 'px');
+		};
+		const onUp = () => {
+			document.removeEventListener('mousemove', onMove);
+			document.removeEventListener('mouseup', onUp);
+			document.body.classList.remove('ap-resizing');
+		};
+		document.addEventListener('mousemove', onMove);
+		document.addEventListener('mouseup', onUp);
+	});
+}
 
 // 5종 설명 슬롯 — spec-html APP_DATA 의 desc 키(functional/interaction/data/business/technical)와 1:1.
 // generic 목업에서도 같은 슬롯을 수동으로 채울 수 있다(주입만 spec-html 전용, 슬롯·편집은 목업 무관).
@@ -185,7 +242,7 @@ async function saveTab(asNew) {
 	if (asNew) res = await window.ddsv.saveAnnotatedAs(tab.docPath, html);
 	else res = await window.ddsv.saveAnnotated(tab.docPath, html);
 	if (!res || res.canceled) return;
-	if (!res.ok) { window.alert('저장 실패\n' + (res.error || '')); return; }
+	if (!res.ok) { showToast('저장 실패 — ' + (res.error || '알 수 없는 오류'), 'err'); return; }
 	// 저장 성공 — 메모리 상태를 저장본에 맞춘다(재저장 멱등·더티 해제). 경로 갱신(다른 이름 저장).
 	tab.docPath = res.filePath || tab.docPath;
 	tab.raw = html;
@@ -195,6 +252,8 @@ async function saveTab(asNew) {
 	renderTabstrip(groupOf(tab));
 	syncTopbar();
 	highlightActive(tab.docPath);
+	const name = (tab.docPath.split(/[\\/]/).pop() || tab.docPath);
+	showToast('저장됨 ✓  ' + name, 'ok');
 }
 if (saveBtn) saveBtn.addEventListener('click', (e) => saveTab(!!e.shiftKey));
 window.ddsv.onMenuSave((as) => saveTab(!!as));
@@ -516,7 +575,14 @@ function renderAnnotPanel() {
 	const anns = set && Array.isArray(set.annotations) ? DDNumbering.sortedBySeq(set) : [];
 	const show = !!(tab && tab.docPath && (tab.editMode || anns.length > 0));
 	annotPanel.classList.toggle('hidden', !show);
-	if (!show) { if (apDetail) apDetail.classList.add('hidden'); return; }
+	if (apGutter) apGutter.classList.toggle('hidden', !show); // 거터도 패널과 함께
+	if (!show) {
+		if (apDetail) apDetail.classList.add('hidden');
+		if (apReopen) apReopen.classList.add('hidden'); // 패널 숨기면 재열기 버튼도 숨김
+		return;
+	}
+	// 패널이 접혀 있으면 재열기 버튼 노출
+	if (apReopen) apReopen.classList.toggle('hidden', !layoutEl.classList.contains('panel-collapsed'));
 	// 초안 불러오기 — 편집 모드 + spec-html 목업(APP_DATA)일 때만. generic 목업엔 숨김(불변 원칙).
 	if (apImport) {
 		const canImport = !!(tab.editMode && DDOverlay.readAppData(tab.frame));
@@ -816,7 +882,10 @@ window.addEventListener('mouseup', (e) => {
 // 단축키 — Ctrl+E 주석 편집, Ctrl+\ 분할, Alt+←/→ 이동 (활성 탭 기준). 줌은 메인의 before-input-event 가 처리.
 document.addEventListener('keydown', (e) => {
 	const ctrl = e.ctrlKey || e.metaKey;
-	if (ctrl && (e.key === 's' || e.key === 'S')) {
+	if (ctrl && (e.key === 'b' || e.key === 'B')) {
+		e.preventDefault();
+		toggleSidebar();
+	} else if (ctrl && (e.key === 's' || e.key === 'S')) {
 		e.preventDefault();
 		saveTab(e.shiftKey); // Ctrl+Shift+S = 다른 이름으로
 	} else if (ctrl && (e.key === 'e' || e.key === 'E')) {
