@@ -44,15 +44,26 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 	border-radius: 8px; font: 500 11px/1.5 Pretendard, -apple-system, sans-serif; pointer-events: none;
 }
 .dd-tray b { color: #fff; }
+/* 문서 뷰 — 목업 자체 우측 화면정보(#description: 요약·화면 전환·사용법)를 숨겨 dd 설명 표와 중복 제거.
+   spec-html 전용 id 라 generic 목업엔 무효(무해). area-rail·el-pin·매핑은 body.clean 이 담당. */
+body.dd-docview #description { display: none !important; }
 `;
 
 	// element 모드 대상 조회 — CSS.escape 폴백 포함(구형 환경 방어).
+	//   앵커 속성 다속성 인식(M6) — spec-html 앱은 data-element-id, 어드민(옛 목업)은 data-field 를 쓴다.
+	//   저장된 elementId 가 어느 속성 값인지 모르므로 둘 다 시도(앱·어드민 목업 완전한 합).
 	function queryElement(doc, elementId) {
 		const esc = (doc.defaultView && doc.defaultView.CSS && doc.defaultView.CSS.escape)
 			? doc.defaultView.CSS.escape(elementId)
 			: String(elementId).replace(/["\\]/g, '\\$&');
-		return doc.querySelector(`[data-element-id="${esc}"]`);
+		return doc.querySelector(`[data-element-id="${esc}"]`) || doc.querySelector(`[data-field="${esc}"]`);
 	}
+
+	// 요소의 앵커 id — data-element-id(앱) 우선, 없으면 data-field(어드민). 둘 다 안정 식별자.
+	function elementIdOf(el) {
+		return el.getAttribute('data-element-id') || el.getAttribute('data-field');
+	}
+	const ANCHOR_SEL = '[data-element-id], [data-field]';
 
 	// coord 모드 기준 컨테이너 — 'frame' 은 목업 프레임 우선, 폴백 body (자유형 정적 목업 대응).
 	function basisElement(doc, basis) {
@@ -246,7 +257,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 			const stack = doc.elementsFromPoint ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
 			for (const el of stack) {
 				if (!el || root.contains(el)) continue;
-				const hit = el.closest ? el.closest('[data-element-id]') : null;
+				const hit = el.closest ? el.closest(ANCHOR_SEL) : null; // data-element-id(앱) 또는 data-field(어드민)
 				if (hit) return hit; // 실제 매치에서만 종료 — 오버레이·비앵커 래퍼는 건너뛴다
 			}
 			return null;
@@ -273,7 +284,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 				const r = el.getBoundingClientRect();
 				const anchor = {
 					mode: 'element',
-					elementId: el.getAttribute('data-element-id'),
+					elementId: elementIdOf(el),
 					offsetPct: DDAnchor.offsetPctFromPoint({ left: x, top: y }, { left: r.left, top: r.top, width: r.width, height: r.height }),
 				};
 				if (screen) anchor.screenId = screen;
@@ -299,7 +310,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 				if (inside && r.width > 0 && r.height > 0) {
 					const anchor = {
 						mode: 'element',
-						elementId: el.getAttribute('data-element-id'),
+						elementId: elementIdOf(el),
 						rectPct: DDAnchor.coordFromRect(absRect, { left: r.left, top: r.top, width: r.width, height: r.height }),
 					};
 					if (screen) anchor.screenId = screen;

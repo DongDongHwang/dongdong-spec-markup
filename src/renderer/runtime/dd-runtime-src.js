@@ -51,6 +51,7 @@
 #dd-panel .dd-p-body ul { margin: 2px 0; padding-left: 16px; }
 #dd-panel.dd-collapsed { width: auto; bottom: auto; }
 #dd-panel.dd-collapsed .dd-p-list { display: none; }
+body.dd-docview #description { display: none !important; }
 @media print { #dd-panel { position: static; width: auto; box-shadow: none; border: none; } #dd-overlay-root .dd-pin { box-shadow: none; } }
 `;
 
@@ -64,6 +65,8 @@
 		try { set = JSON.parse(dataEl.textContent); } catch (e) { return; }
 		if (!set || !set.annotations || !set.annotations.length) return;
 		var anns = set.annotations;
+		// spec-html 목업이면 자체 주석(area-rail·el-pin·매핑) 끄기 — dd 핀과 겹침 방지(dd 앱 clean 과 동일). 목업 좌하단 토글로 되돌릴 수 있다.
+		try { if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) doc.body.classList.add('clean'); } catch (e) {}
 
 		// ---- 앵커 math (anchor.js 인라인) ----
 		function pinPoint(rect, off) {
@@ -81,7 +84,7 @@
 		function esc(id) {
 			return (win.CSS && win.CSS.escape) ? win.CSS.escape(id) : String(id).replace(/["\\]/g, '\\$&');
 		}
-		function queryEl(id) { return doc.querySelector('[data-element-id="' + esc(id) + '"]'); }
+		function queryEl(id) { return doc.querySelector('[data-element-id="' + esc(id) + '"]') || doc.querySelector('[data-field="' + esc(id) + '"]'); } // 앱 data-element-id + 어드민 data-field
 		function basisEl(basis) {
 			if (basis === 'frame') return doc.querySelector('.mobile-frame') || doc.querySelector('.web-frame') || doc.querySelector('.frame-stage') || doc.body;
 			return doc.body;
@@ -176,6 +179,7 @@
 		docBtn.addEventListener('click', function () {
 			docMode = !docMode;
 			doc.body.classList.toggle('dd-doc-mode', docMode);
+			doc.body.classList.toggle('dd-docview', docMode); // 목업 우측 화면정보(#description) 숨김
 			docBtn.textContent = docMode ? '전체 보기' : '문서 뷰';
 			docBtn.classList.toggle('dd-on', docMode);
 			renderList();

@@ -163,11 +163,11 @@ function createTab(group) {
 	const frame = document.createElement('iframe');
 	frame.className = 'doc-frame hidden'; // 문서 로드 전엔 숨김(웰컴만 표시)
 	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이를 iframe 문서 내부에 주입). 네비 가드·오버레이는 load 에서.
-	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); });
+	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); applyMockupChrome(tab); });
 	contentEl.append(welcomeEl, frame);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
-		editMode: false, docMode: false, dirty: false, // M3 편집 토글 + M5.5 문서 뷰 토글(상호 배타) + 미저장 표시
+		editMode: false, docMode: false, isAnnotated: false, dirty: false, // M3 편집 + M5.5 문서 뷰 + M6 주석본 파일 여부(저장 대상 판별) + 미저장 표시
 		contentEl, welcomeEl, frame,
 		navHistory: [], navIndex: -1,
 	};
@@ -214,6 +214,18 @@ function attachOverlay(tab) {
 	});
 }
 
+// spec-html 목업 크롬 정리 — 목업 자체 주석(area-rail·el-pin·매핑)은 dd 핀과 겹치므로 clean 으로 끈다.
+//   문서 뷰에선 우측 화면정보(#description: 요약·전환·사용법)까지 숨긴다(dd 표로 대체). 좌측 화면목록 nav 는 전환 수단이라 유지.
+//   generic 목업엔 clean 클래스·#description 이 없어 무효(무해). clean 은 목업 자체 상태 전환이라 무손상(저장물엔 미포함).
+function applyMockupChrome(tab) {
+	try {
+		const doc = tab.frame.contentDocument;
+		if (!doc || !doc.body) return;
+		if (DDOverlay.detectSpecHtml(tab.frame)) doc.body.classList.add('clean');
+		doc.body.classList.toggle('dd-docview', !!tab.docMode);
+	} catch (_) { /* iframe 접근 불가(문서 교체 중) — 무시 */ }
+}
+
 // 주석 삭제 — 당김 여부는 패널 체크박스가 결정. 오버레이 Delete 키·패널 × 공용.
 function removeAnnotation(tab, id) {
 	if (!tab.annotations) return;
@@ -238,27 +250,37 @@ async function saveTab(asNew) {
 	if (!tab || !tab.docPath) return;
 	const set = tab.annotations;
 	const hasAnn = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
+	if (!hasAnn && !asNew) { showToast('저장할 주석이 없습니다', 'err'); return; } // 주석 없는 순수 목업은 저장 의미 없음(원본 미변경)
 	if (set) set.savedAt = new Date().toISOString();
 	// tab.raw(원본, dd 블록 포함 가능) 기준으로 embed — embed 가 기존 블록 strip 후 1세트만 남긴다(멱등·무손상).
 	//   runtime 인라인(M5b) — 저장본을 dd 없이 브라우저로 열어도 핀·설명이 뜨게 자기완결 뷰어를 심는다.
 	const runtime = (window.DDRuntimeSrc && { css: window.DDRuntimeSrc.RUNTIME_CSS, js: window.DDRuntimeSrc.RUNTIME_JS }) || null;
 	const html = hasAnn ? window.DDHtmlIO.embed(tab.raw, set, runtime) : window.DDHtmlIO.strip(tab.raw);
-	let res;
-	if (asNew) res = await window.ddsv.saveAnnotatedAs(tab.docPath, html);
-	else res = await window.ddsv.saveAnnotated(tab.docPath, html);
+	// 저장 정책(복사-편집, M6) — 원본 목업은 절대 덮어쓰지 않는다.
+	//   asNew=다른 이름 저장 / isAnnotated=이미 주석본이라 그 자리 재저장 / 그 외=순수 목업 첫 저장 → 원본 옆 _dd.html 복사본 생성
+	let res, wasCopy = false;
+	if (asNew) {
+		res = await window.ddsv.saveAnnotatedAs(tab.docPath, html);
+	} else if (tab.isAnnotated) {
+		res = await window.ddsv.saveAnnotated(tab.docPath, html);
+	} else {
+		res = await window.ddsv.saveAnnotatedCopy(tab.docPath, html);
+		wasCopy = !!(res && res.copied);
+	}
 	if (!res || res.canceled) return;
 	if (!res.ok) { showToast('저장 실패 — ' + (res.error || '알 수 없는 오류'), 'err'); return; }
-	// 저장 성공 — 메모리 상태를 저장본에 맞춘다(재저장 멱등·더티 해제). 경로 갱신(다른 이름 저장).
+	// 저장 성공 — 메모리 상태를 저장본에 맞춘다(재저장 멱등·더티 해제). 경로를 주석본으로 전환.
 	tab.docPath = res.filePath || tab.docPath;
 	tab.raw = html;
 	const io = window.DDHtmlIO.extract(html);
 	tab.pure = io.pure;
+	tab.isAnnotated = true; // 저장 후엔 주석본 — 다음 저장부터 그 자리 재저장(복사본 재생성 안 함)
 	tab.dirty = false;
 	renderTabstrip(groupOf(tab));
 	syncTopbar();
 	highlightActive(tab.docPath);
 	const name = (tab.docPath.split(/[\\/]/).pop() || tab.docPath);
-	showToast('저장됨 ✓  ' + name, 'ok');
+	showToast('저장됨 ✓  ' + name + (wasCopy ? '  · 복사본 생성(원본 보존)' : ''), 'ok');
 }
 if (saveBtn) saveBtn.addEventListener('click', (e) => saveTab(!!e.shiftKey));
 window.ddsv.onMenuSave((as) => saveTab(!!as));
@@ -274,6 +296,7 @@ function toggleEdit() {
 	}
 	if (tab.overlay) tab.overlay.setEditable(tab.editMode);
 	else attachOverlay(tab);
+	applyMockupChrome(tab); // 편집으로 전환 시 dd-docview(문서 뷰 전용 숨김) 해제 반영
 	syncTopbar();
 }
 if (editBtn) editBtn.addEventListener('click', toggleEdit);
@@ -291,6 +314,7 @@ function toggleDocMode() {
 		if (tab.overlay) tab.overlay.setEditable(false);
 		else attachOverlay(tab); // 주석 있으면 읽기 오버레이 부착(핀 표시)
 	}
+	applyMockupChrome(tab); // 문서 뷰 = 목업 우측 화면정보(#description)까지 숨김 / 해제 시 복귀
 	syncTopbar();
 }
 if (docBtn) docBtn.addEventListener('click', toggleDocMode);
@@ -387,6 +411,7 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	const io = window.DDHtmlIO.extract(tab.raw); // 재개봉 — dd 블록 분리(중복 누적 방지). 없으면 set=null
 	tab.pure = io.pure;
 	tab.annotations = io.set;
+	tab.isAnnotated = !!io.set; // 이 파일이 이미 dd 주석본인지 — 순수 목업이면 첫 저장 시 복사본 생성(원본 보존)
 	tab.exists = true;
 	tab.editMode = false; // 새 문서 = 뷰어 모드부터 (편집은 명시 토글)
 	tab.docMode = false;  // 문서 뷰도 리셋(이전 문서의 표 잔류 방지)

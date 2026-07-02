@@ -362,6 +362,27 @@ ipcMain.handle('save-annotated-html', (_e, filePath, html) => {
 	try { return writeVerified(filePath, html); } catch (e) { return { ok: false, error: e.message }; }
 });
 
+// 복사 저장 (M6) — 순수 목업을 처음 저장할 때 호출. 원본(srcPath)은 절대 안 건드리고,
+// 원본 옆에 `<stem>_dd.html` 을 새로 만들어 거기에 쓴다(이미 있으면 `_dd_2` 등으로 충돌 회피).
+// 원본이 이미 `_dd` 로 끝나면(주석본 재저장 경로가 아닌 예외 유입) stem 그대로 두어 중복 `_dd_dd` 를 막는다.
+ipcMain.handle('save-annotated-copy', (_e, srcPath, html) => {
+	if (!srcPath || typeof srcPath !== 'string' || typeof html !== 'string') return { ok: false, error: '인자 누락' };
+	try {
+		const dir = path.dirname(srcPath);
+		const ext = path.extname(srcPath) || '.html';
+		const stem = path.basename(srcPath, ext);
+		const base = /_dd$/i.test(stem) ? stem : stem + '_dd';
+		let target = path.join(dir, base + ext);
+		let n = 2;
+		while (fs.existsSync(target)) { target = path.join(dir, base + '_' + n + ext); n++; }
+		const res = writeVerified(target, html);
+		if (res.ok) res.copied = true;
+		return res;
+	} catch (e) {
+		return { ok: false, error: e.message };
+	}
+});
+
 // 다른 이름으로 저장 — 기본 파일명은 원본 옆 `<이름>_annotated.html`. 취소 시 { canceled:true }.
 ipcMain.handle('save-annotated-html-as', async (e, srcPath, html) => {
 	if (typeof html !== 'string') return { ok: false, error: 'html 누락' };

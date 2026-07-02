@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('ddsv', {
 	// 주석 HTML 저장 (M5) — 현재 경로 덮어쓰기 / 다른 이름 저장. html 은 DDHtmlIO.embed 결과 최종본.
 	saveAnnotated: (filePath, html) => ipcRenderer.invoke('save-annotated-html', filePath, html),
 	saveAnnotatedAs: (srcPath, html) => ipcRenderer.invoke('save-annotated-html-as', srcPath, html),
+	// 복사 저장 (M6) — 순수 목업 첫 저장 시 원본 옆 (stem)_dd.html 자동 생성(원본 미변경). -> { ok, filePath, copied }
+	saveAnnotatedCopy: (srcPath, html) => ipcRenderer.invoke('save-annotated-copy', srcPath, html),
 	// 메뉴/단축키 저장 신호 (Ctrl+S / Ctrl+Shift+S)
 	onMenuSave: (cb) => ipcRenderer.on('menu-save', (_e, as) => cb(as)),
 });

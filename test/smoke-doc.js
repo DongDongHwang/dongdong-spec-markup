@@ -38,10 +38,22 @@ body{margin:0;font-family:sans-serif}.card{width:400px;margin:20px auto;border:1
 <div class="card">임의 HTML 목업 — 앵커·APP_DATA 없음</div>
 </body></html>`;
 
+// 어드민 유사 목업 — APP_DATA 없음(generic 판정) + data-field 앵커(어드민 규약). WS-F 앵커 다속성 인식 검증.
+const ADMIN_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+body{margin:0;font-family:sans-serif}.wf-nav{padding:8px;background:#eee}
+.field{display:inline-block;padding:16px 24px;margin:8px;border:1px solid #bbb}
+</style></head><body>
+<nav class="wf-nav"><a data-screen="s1">화면1</a></nav>
+<div><span class="field" data-field="apply_at">신청일</span><span class="field" data-field="status">상태</span></div>
+<script>const FIELDS={apply_at:{label:"신청일"},status:{label:"상태"}};</script>
+</body></html>`;
+
 const specPath = path.join(TMP, 'spec-like.html');
 const genPath = path.join(TMP, 'generic.html');
+const adminPath = path.join(TMP, 'admin.html');
 fs.writeFileSync(specPath, SPEC_HTML, 'utf8');
 fs.writeFileSync(genPath, GENERIC_HTML, 'utf8');
+fs.writeFileSync(adminPath, ADMIN_HTML, 'utf8');
 
 // headless 안정화 — 무거운 목업 로드 시 네트워크서비스 크래시·hang 방지(메모리 기록).
 const { app, BrowserWindow } = require('electron');
@@ -77,7 +89,9 @@ const SPEC_SCENARIO = `(function(){
 		rows:document.querySelectorAll('#annot-list .doc-row').length,
 		detailHidden:(!d||getComputedStyle(d).display==='none'),
 		firstBodyHasHtml:!!document.querySelector('#annot-list .doc-row .doc-body b'),
-		curScreen:window.currentScreenId(tab)
+		curScreen:window.currentScreenId(tab),
+		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean'),
+		docviewApplied:tab.frame.contentDocument.body.classList.contains('dd-docview')
 	};
 })()`;
 
@@ -97,7 +111,8 @@ const GENERIC_SCENARIO = `(function(){
 		docMode:document.getElementById('layout').classList.contains('doc-mode'),
 		rows:document.querySelectorAll('#annot-list .doc-row').length,
 		importHidden:(!b||b.classList.contains('hidden')),
-		curScreen:window.currentScreenId(tab)
+		curScreen:window.currentScreenId(tab),
+		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean')
 	};
 })()`;
 
@@ -115,12 +130,32 @@ app.whenReady().then(async () => {
 	check('현재 화면(S1) 소속 핀만 표에 = 2행 (S2 제외)', r1.rows === 2, 'rows=' + r1.rows + ' curScreen=' + r1.curScreen);
 	check('편집기(ap-detail) 숨김', r1.detailHidden === true);
 	check('설명 body 리치텍스트(html) 렌더', r1.firstBodyHasHtml === true);
+	check('spec-html 목업 clean 자동 적용(목업 자체 주석 끔)', r1.cleanApplied === true);
+	check('문서 뷰 → iframe body.dd-docview(#description 숨김)', r1.docviewApplied === true);
 
 	await wc.executeJavaScript(SWITCH_SCENARIO);
-	await wait(400); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더
+	await wait(650); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)
 	const r1b = await wc.executeJavaScript(AFTER_SWITCH);
 	check('화면 전환(S2) 시 현재 화면 인식', r1b.curScreen === 'S2', 'curScreen=' + r1b.curScreen);
 	check('화면 전환 후 표 재렌더 = S2 핀 1행', r1b.rows === 1, 'rows=' + r1b.rows);
+
+	console.log('== WS-A 리사이즈 (변수 통일) ==');
+	const rz = await wc.executeJavaScript(`(function(){
+		document.documentElement.style.setProperty('--ap-width','250px');
+		var p=document.querySelector('.annot-panel');
+		var docFB=getComputedStyle(p).flexBasis;
+		window.toggleEdit();
+		var editFB=getComputedStyle(p).flexBasis;
+		return { docFB:docFB, editFB:editFB };
+	})()`);
+	check('편집·문서 뷰 폭 동일(--ap-width 단일 변수)', rz.docFB === rz.editFB && rz.docFB === '250px', 'doc=' + rz.docFB + ' edit=' + rz.editFB);
+
+	console.log('== WS-B 저장 복사 (원본 보존) ==');
+	await wc.executeJavaScript(`(async function(){ window.confirm=function(){return true;}; await window.saveTab(false); return true; })()`);
+	await wait(400);
+	const ddPath = specPath.replace(/\.html$/i, '_dd.html');
+	check('순수 목업 첫 저장 → 원본 옆 _dd.html 생성', fs.existsSync(ddPath), ddPath);
+	check('원본 목업 무변경', fs.readFileSync(specPath, 'utf8') === SPEC_HTML);
 
 	console.log('== generic 목업 (좌표·앵커 없음) ==');
 	await wc.executeJavaScript(GENERIC_LOAD);
@@ -131,6 +166,27 @@ app.whenReady().then(async () => {
 	check('화면 개념 없음 → 좌표핀 전부 표에 = 1행', r2.rows === 1, 'rows=' + r2.rows);
 	check('generic 은 초안 버튼 숨김(불변 원칙)', r2.importHidden === true);
 	check('generic curScreen = null', r2.curScreen === null || r2.curScreen === undefined, 'curScreen=' + JSON.stringify(r2.curScreen));
+	check('generic 은 clean 미적용(spec-html 아님)', r2.cleanApplied === false);
+
+	console.log('== admin 목업 (data-field 앵커·APP_DATA 없음) ==');
+	await wc.executeJavaScript(`(async function(){ window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(adminPath)}, {history:false}); return true; })()`);
+	await wait(600);
+	const r3 = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		window.toggleEdit();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var el=doc.querySelector('[data-field="apply_at"]');
+		var r=el.getBoundingClientRect();
+		var cx=Math.round(r.left+r.width/2), cy=Math.round(r.top+r.height/2);
+		doc.dispatchEvent(new win.MouseEvent('mousedown',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		var anns=tab.annotations.annotations, a=anns[anns.length-1];
+		return { src:tab.annotations.source.kind, count:anns.length, mode:a&&a.anchor&&a.anchor.mode, elementId:a&&a.anchor&&a.anchor.elementId };
+	})()`);
+	check('admin generic 판정(APP_DATA 없음)', r3.src === 'generic', 'src=' + r3.src);
+	check('admin 핀 생성됨', r3.count >= 1, 'count=' + r3.count);
+	check('admin data-field 요소에 element 앵커(WS-F)', r3.mode === 'element', 'mode=' + r3.mode);
+	check('admin 앵커 elementId = data-field 값', r3.elementId === 'apply_at', 'elementId=' + r3.elementId);
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
