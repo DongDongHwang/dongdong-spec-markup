@@ -32,6 +32,7 @@ const apdMkExtra = document.getElementById('apd-mark-extra');
 const apdMkPhase = document.getElementById('apd-mk-phase');
 const apdMkDate = document.getElementById('apd-mk-date');
 const apdMkReason = document.getElementById('apd-mk-reason');
+const apdParentSel = document.getElementById('apd-parent-sel');
 const layoutEl = document.getElementById('layout');
 const sidebarToggle = document.getElementById('sidebar-toggle');
 const apGutter = document.getElementById('ap-gutter');
@@ -798,9 +799,24 @@ function renderAnnotPanel() {
 		rm.textContent = '×';
 		rm.title = '삭제 (Delete)';
 		const badge = statusBadgeEl(a);
+		// 그룹색(1-A/1-B) — 라벨 배경 + 좌측 바. 자식은 들여쓰기로 계층 표시.
+		const gc = DDNumbering.isGrouped(set, a) ? DDModel.groupColorForKey(DDNumbering.groupKey(a)) : null;
+		if (gc) { label.style.background = gc; label.style.color = '#fff'; li.style.borderLeft = '3px solid ' + gc; }
+		if (a.parentId) li.style.paddingLeft = '20px';
 		li.append(label, type, text);
 		if (badge) li.appendChild(badge);
 		li.append(auto, rm);
+		// 날짜·사유 캡션 — 배지 아래 한 줄(주석엔 날짜+사유 둘 다), 색은 차수색.
+		if (a.mark && (a.mark.addedAt || a.mark.reason)) {
+			const cap = document.createElement('span');
+			cap.className = 'annot-mark-cap';
+			const parts = [];
+			if (a.mark.addedAt) parts.push(a.mark.addedAt);
+			if (a.mark.reason) parts.push(a.mark.reason);
+			cap.textContent = parts.join(' · ');
+			cap.style.color = DDModel.statusColor(a);
+			li.appendChild(cap);
+		}
 		// 선택 동기화 — 행 클릭 → 오버레이 핀 하이라이트
 		li.addEventListener('click', (e) => {
 			if (e.target === rm || e.target === auto) return;
@@ -1023,6 +1039,7 @@ function renderDetail() {
 	apdLabel.textContent = ann.label;
 	apdName.textContent = ann.type === 'box' ? '범위 설명' : '핀 설명';
 	renderMark(ann);
+	renderParentSelect(ann);
 	apdSlotMode = !!(ann.slots && ann.slots.fields);
 	apdSlotsBtn.classList.toggle('is-on', apdSlotMode);
 	apdEditor.classList.toggle('hidden', apdSlotMode);
@@ -1108,6 +1125,39 @@ if (apdMkOld) apdMkOld.addEventListener('click', () => applyMark({ kind: '기존
 if (apdMkPhase) apdMkPhase.addEventListener('change', () => applyMark({ phase: Number(apdMkPhase.value) || 1 }));
 if (apdMkDate) apdMkDate.addEventListener('change', () => applyMark({ addedAt: apdMkDate.value || null }));
 if (apdMkReason) apdMkReason.addEventListener('input', () => applyMark({ reason: apdMkReason.value }));
+
+// 상위 핀(묶음) 지정 — 이 핀을 다른 핀의 하위(1-A)로. 후보 = 최상위 핀만(1단계 계층). 자식을 가진 핀은 비활성.
+function renderParentSelect(ann) {
+	if (!apdParentSel) return;
+	const { tab } = selectedAnnotation();
+	const set = tab && tab.annotations;
+	if (!set) return;
+	const iAmParent = set.annotations.some((x) => x.parentId === ann.id);
+	apdParentSel.innerHTML = '';
+	const none = document.createElement('option');
+	none.value = '';
+	none.textContent = '최상위 (묶음 없음)';
+	apdParentSel.appendChild(none);
+	set.annotations
+		.filter((x) => x.id !== ann.id && !x.parentId) // 최상위 핀만 부모 후보
+		.forEach((x) => {
+			const o = document.createElement('option');
+			o.value = x.id;
+			o.textContent = x.label + ' 의 하위로';
+			apdParentSel.appendChild(o);
+		});
+	apdParentSel.value = ann.parentId || '';
+	apdParentSel.disabled = iAmParent;
+	apdParentSel.title = iAmParent
+		? '하위 핀을 가진 핀은 다른 핀의 하위로 묶을 수 없습니다(1단계 계층)'
+		: '이 핀을 다른 핀의 하위(1-A)로 묶기';
+}
+if (apdParentSel) apdParentSel.addEventListener('change', () => {
+	const { tab, ann } = selectedAnnotation();
+	if (!ann || !tab) return;
+	DDNumbering.setParent(tab.annotations, ann.id, apdParentSel.value || null);
+	afterAnnotMutate(tab);
+});
 
 // 리스트 행의 요약 텍스트만 갱신(패널 통째 re-render 없이 — 편집 중 포커스 유지).
 function updateRowText(ann) {

@@ -40,9 +40,11 @@
 #dd-overlay-root .dd-box.dd-ph { border-color: #D97706; }
 #dd-overlay-root .dd-box.dd-ph .dd-box-label { background: #D97706; }
 #dd-overlay-root .dd-phase-badge { position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px; font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; }
+#dd-overlay-root .dd-date-cap { position: absolute; left: 50%; top: calc(100% + 3px); transform: translateX(-50%); white-space: nowrap; font: 600 9px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
 #dd-panel .dd-p-badge { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; margin-right: 4px; align-self: flex-start; }
 #dd-panel .dd-p-badge.dd-b-new { background: rgba(24,165,88,.15); color: #18a558; }
 #dd-panel .dd-p-badge.dd-b-modified { background: rgba(224,134,0,.2); color: #c26f00; }
+#dd-panel .dd-p-mark { font-size: 10.5px; font-weight: 600; margin-top: 3px; }
 #dd-panel {
 	position: fixed; right: 14px; top: 14px; bottom: 14px; width: 300px; z-index: 99992;
 	display: flex; flex-direction: column; background: #fff; color: #1f2328;
@@ -84,6 +86,15 @@ body.dd-docview #description { display: none !important; }
 		function annPhase(a) { return (a && a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0; }
 		function annBadgeLabel(a) { var st = annStatus(a); if (st === 'new') { var ph = annPhase(a); return ph ? '신규·' + ph + '차' : '신규'; } return st === 'modified' ? '수정' : '기존'; }
 		function annTip(a) { var p = []; if (a.mark && a.mark.addedAt) p.push(a.mark.addedAt); if (a.mark && a.mark.reason) p.push(a.mark.reason); return p.join(' · '); }
+		// 색 SSOT(자기완결 — core annotation-model 판박이). "색은 계속 달라야" → 차수·그룹 팔레트 순환.
+		var PHASE_PAL = ['#18a558', '#D97706', '#0891B2', '#7C3AED', '#DB2777', '#CA8A04', '#0D9488', '#DC2626'];
+		var GROUP_PAL = ['#7C3AED', '#EA580C', '#0891B2', '#DB2777', '#65A30D', '#2563EB', '#C026D3', '#0D9488'];
+		function phaseCol(ph) { var p = (typeof ph === 'number' && ph >= 1) ? Math.floor(ph) : 1; return PHASE_PAL[(p - 1) % PHASE_PAL.length]; }
+		function statusCol(a) { var st = annStatus(a); if (st === 'modified') return '#E08600'; if (st === 'unchanged') return '#6B7280'; return phaseCol(a && a.mark && a.mark.phase ? a.mark.phase : 1); }
+		function groupCol(key) { if (!key) return null; var h = 0; for (var i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0; return GROUP_PAL[h % GROUP_PAL.length]; }
+		function isGrp(a) { if (!a) return false; var i; if (a.parentId) { for (i = 0; i < anns.length; i++) if (anns[i].id === a.parentId) return true; } for (i = 0; i < anns.length; i++) if (anns[i].parentId === a.id) return true; return false; }
+		function grpKey(a) { return a && a.parentId ? a.parentId : (a ? a.id : null); }
+		function escHtml(s) { return String(s).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
 
 		// ---- 앵커 math (anchor.js 인라인) ----
 		function pinPoint(rect, off) {
@@ -142,9 +153,15 @@ body.dd-docview #description { display: none !important; }
 				}
 				el.setAttribute('data-dd-id', a.id);
 				var pst = annStatus(a); el.className += ' dd-st-' + pst;
+				// 색 인라인 — 신규 차수색·수정 주황·기존 현행. 그룹(1-A/1-B) ring. dd 앱 applyPinColor 판박이.
+				var fill = pst === 'new' ? phaseCol(a.mark && a.mark.phase ? a.mark.phase : 1) : (pst === 'modified' ? '#E08600' : (a.style && a.style.color ? a.style.color : null));
+				if (fill) { if (a.type === 'box') { el.style.borderColor = fill; if (lb) lb.style.background = fill; } else el.style.background = fill; }
+				var gc = isGrp(a) ? groupCol(grpKey(a)) : null;
+				if (gc && a.type !== 'box') el.style.boxShadow = '0 0 0 2px #fff, 0 0 0 4px ' + gc + ', 0 1px 4px rgba(0,0,0,.35)';
+				else if (gc) el.style.outline = '2px solid ' + gc;
 				var pph = annPhase(a);
-				if (pph) { el.className += ' dd-ph'; var pbg = doc.createElement('span'); pbg.className = 'dd-phase-badge'; pbg.textContent = pph + '차'; el.appendChild(pbg); }
-				else if (pst === 'unchanged' && a.style && a.style.color) { if (a.type === 'box') el.style.borderColor = a.style.color; else el.style.background = a.style.color; }
+				if (pph) { el.className += ' dd-ph'; var pbg = doc.createElement('span'); pbg.className = 'dd-phase-badge'; pbg.textContent = pph + '차'; pbg.style.background = phaseCol(pph); el.appendChild(pbg); }
+				if (a.type !== 'box' && a.mark && a.mark.addedAt) { var dc = doc.createElement('span'); dc.className = 'dd-date-cap'; dc.textContent = a.mark.addedAt; dc.style.color = statusCol(a); el.appendChild(dc); }
 				var ptip = annTip(a); if (ptip) el.title = '[' + annBadgeLabel(a) + '] ' + ptip;
 				el.style.display = 'none';
 				el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
@@ -191,7 +208,12 @@ body.dd-docview #description { display: none !important; }
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
 					var lst = annStatus(a), lbadge = (lst === 'new' || lst === 'modified') ? '<span class="dd-p-badge dd-b-' + lst + '">' + annBadgeLabel(a) + '</span>' : '';
-					li.innerHTML = '<span class="dd-p-num">' + a.label + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + '</div>';
+					var lgc = isGrp(a) ? groupCol(grpKey(a)) : null; // 그룹색(1-A/1-B)
+					var numStyle = lgc ? ' style="background:' + lgc + ';color:#fff"' : '';
+					var lcap = (a.mark && (a.mark.addedAt || a.mark.reason)) ? '<div class="dd-p-mark" style="color:' + statusCol(a) + '">' + escHtml(annTip(a)) + '</div>' : ''; // 날짜·사유
+					li.innerHTML = '<span class="dd-p-num"' + numStyle + '>' + a.label + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + lcap + '</div>';
+					if (lgc) li.style.borderLeft = '3px solid ' + lgc;
+					if (a.parentId) li.style.paddingLeft = '18px';
 					li.addEventListener('click', function () { selectAnn(a.id); });
 					list.appendChild(li); rows[a.id] = li;
 				})(sa[j]);

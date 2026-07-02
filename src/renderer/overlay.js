@@ -51,6 +51,11 @@ const DDOverlay = (() => {
 	background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px;
 	font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none;
 }
+#${ROOT_ID} .dd-date-cap {
+	position: absolute; left: 50%; top: calc(100% + 3px); transform: translateX(-50%);
+	white-space: nowrap; font: 600 9px/1 Pretendard, -apple-system, sans-serif; pointer-events: none;
+	text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
 #${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
 #${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
@@ -163,6 +168,27 @@ body.clean #screen-nav { display: none !important; }
 
 		// 주석별 DOM 노드 — 구조 변경(추가·삭제·재번호) 시 rebuildNodes 로 전체 재생성 (수십 개 규모라 싸다)
 		const nodes = new Map();
+		// 색 적용(인라인) — 신규=차수색(팔레트 순환), 수정=주황, 기존=현행 색 유지. 그룹(1-A/1-B)은 테두리 ring.
+		//   CSS 색 클래스보다 인라인이 우선 → 2·3차가 서로 다른 색으로 표시된다("색은 계속 달라야").
+		function applyPinColor(el, a) {
+			const st = DDModel.annotStatus(a);
+			let fill = null;
+			if (st === 'new') fill = DDModel.phaseColor(a.mark && a.mark.phase ? a.mark.phase : 1);
+			else if (st === 'modified') fill = '#E08600';
+			else if (a.style && a.style.color) fill = a.style.color; // 기존 — 현행 색
+			if (fill) {
+				if (a.type === 'box') {
+					el.style.borderColor = fill;
+					const lb = el.querySelector('.dd-box-label');
+					if (lb) lb.style.background = fill;
+				} else {
+					el.style.background = fill;
+				}
+			}
+			const gc = DDNumbering.isGrouped(set, a) ? DDModel.groupColorForKey(DDNumbering.groupKey(a)) : null;
+			if (gc && a.type !== 'box') el.style.boxShadow = '0 0 0 2px #fff, 0 0 0 4px ' + gc + ', 0 1px 4px rgba(0,0,0,.35)';
+			else if (gc) el.style.outline = '2px solid ' + gc;
+		}
 		function makeNode(a) {
 			let el;
 			if (a.type === 'box') {
@@ -180,16 +206,22 @@ body.clean #screen-nav { display: none !important; }
 			el.dataset.ddId = a.id;
 			const badge = DDModel.annotBadge(a); // { status, label, tooltip } — 사용자 마킹 우선, 없으면 origin 폴백
 			el.classList.add('dd-st-' + badge.status);
+			applyPinColor(el, a); // 색 SSOT(인라인) — 신규 차수색·수정 주황·기존 현행·그룹 ring
 			const ph = (a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0;
-			if (ph) { // 신규 2·3차 — 황색 + 차수 배지
+			if (ph) { // 신규 2차 이상 — 차수 배지(색도 차수색)
 				el.classList.add('dd-ph');
 				const pb = doc.createElement('span');
 				pb.className = 'dd-phase-badge';
 				pb.textContent = ph + '차';
+				pb.style.background = DDModel.phaseColor(ph);
 				el.appendChild(pb);
-			} else if (badge.status === 'unchanged' && a.style && a.style.color) {
-				if (a.type === 'box') el.style.borderColor = a.style.color;
-				else el.style.background = a.style.color;
+			}
+			if (a.type !== 'box' && a.mark && a.mark.addedAt) { // 목업 위 핀엔 날짜만(사유는 우측 목록에)
+				const dc = doc.createElement('span');
+				dc.className = 'dd-date-cap';
+				dc.textContent = a.mark.addedAt;
+				dc.style.color = DDModel.statusColor(a);
+				el.appendChild(dc);
 			}
 			const plain = a.body && a.body.plain;
 			const tip = [];
