@@ -32,6 +32,8 @@ const apGutter = document.getElementById('ap-gutter');
 const apCollapse = document.getElementById('ap-collapse');
 const apReopen = document.getElementById('ap-reopen');
 const toastEl = document.getElementById('toast');
+const screenSection = document.getElementById('screen-section'); // M6 화면 네비(현재 문서의 화면 목록)
+const screenList = document.getElementById('screen-list');
 
 // ---- 토스트 (저장 등 결과 피드백) — 조용한 성공이 "안 됨"으로 오해되던 문제 해소 ----
 let toastTimer = null;
@@ -163,7 +165,7 @@ function createTab(group) {
 	const frame = document.createElement('iframe');
 	frame.className = 'doc-frame hidden'; // 문서 로드 전엔 숨김(웰컴만 표시)
 	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이를 iframe 문서 내부에 주입). 네비 가드·오버레이는 load 에서.
-	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); applyMockupChrome(tab); });
+	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); applyMockupChrome(tab); renderScreenNav(); });
 	contentEl.append(welcomeEl, frame);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
@@ -208,7 +210,7 @@ function attachOverlay(tab) {
 		editable: tab.editMode,
 		onChange: () => { markDirty(tab); renderAnnotPanel(); },
 		onSelect: (id) => { if (tab.docMode) highlightDocRow(id); else highlightAnnotRow(id); },
-		onScreenChange: () => { if (tab.docMode) renderAnnotPanel(); }, // 문서 뷰 중 목업 화면 전환 시 우측 표 재렌더
+		onScreenChange: () => { renderAnnotPanel(); renderScreenNav(); }, // 화면 전환 시 패널·네비 재렌더(편집·문서 모두 현재 화면 주석으로)
 
 		onDeleteRequest: (id) => removeAnnotation(tab, id),
 	});
@@ -612,6 +614,7 @@ function syncTopbar() {
 		saveBtn.disabled = !(hasDoc && (tab.dirty || hasAnn));
 	}
 	renderAnnotPanel();
+	renderScreenNav();
 }
 
 if (splitBtn) splitBtn.addEventListener('click', splitActive);
@@ -629,7 +632,8 @@ function renderAnnotPanel() {
 	if (tab && tab.docMode && tab.docPath) { renderDocPanel(tab); return; } // 문서 뷰는 읽기 표로(편집 패널 우회)
 	annotPanel.classList.remove('doc-mode');
 	const set = tab && tab.annotations;
-	const anns = set && Array.isArray(set.annotations) ? DDNumbering.sortedBySeq(set) : [];
+	// 편집 패널도 현재 화면 필터(화면 1급화) — 화면 이동 시 그 화면 주석만. 화면 개념 없으면(generic) 전체.
+	const anns = set && Array.isArray(set.annotations) ? docAnnotationsFor(tab) : [];
 	const show = !!(tab && tab.docPath && (tab.editMode || anns.length > 0));
 	annotPanel.classList.toggle('hidden', !show);
 	if (apGutter) apGutter.classList.toggle('hidden', !show); // 거터도 패널과 함께
@@ -811,6 +815,48 @@ function highlightDocRow(id) {
 		el.classList.toggle('is-active', on);
 		if (on) el.scrollIntoView({ block: 'nearest' });
 	});
+}
+
+// ---- 화면 네비 (M6 화면 1급화) — spec-html 목업의 화면 목록을 dd 좌측에 흡수 --------------
+// 목업 자체 화면목록(#screen-nav)은 clean 으로 숨기고(overlay CSS), 여기서 dd 화면 목록을 렌더한다.
+// 화면 클릭 → goScreen 브리지로 목업 이동 + onScreenChange 가 주석 패널을 그 화면으로 전환. 화면별 주석 개수 배지.
+// generic·화면 개념 없는 목업이면 섹션을 숨긴다(불변 원칙).
+function renderScreenNav() {
+	if (!screenSection || !screenList) return;
+	const tab = activeTab();
+	const app = (tab && tab.docPath) ? DDOverlay.readAppData(tab.frame) : null;
+	const screens = (app && app.screens) ? Object.keys(app.screens).map((k) => app.screens[k]).filter((s) => s && s.id) : [];
+	if (screens.length === 0) { screenSection.classList.add('hidden'); return; }
+	screenSection.classList.remove('hidden');
+	const cur = app.currentScreen;
+	const set = tab.annotations;
+	screenList.innerHTML = '';
+	for (const s of screens) {
+		const cnt = set && Array.isArray(set.annotations)
+			? set.annotations.filter((a) => a.anchor && a.anchor.screenId === s.id).length : 0;
+		const li = document.createElement('li');
+		li.className = 'recent-item';
+		const row = document.createElement('div');
+		row.className = 'tree-row screen-row' + (s.id === cur ? ' is-active' : '');
+		row.title = s.id;
+		const ti = document.createElement('span');
+		ti.className = 'ti';
+		ti.textContent = '🖥';
+		const tn = document.createElement('span');
+		tn.className = 'tn';
+		tn.textContent = s.name || s.id;
+		row.append(ti, tn);
+		if (cnt > 0) {
+			const badge = document.createElement('span');
+			badge.className = 'screen-count';
+			badge.textContent = String(cnt);
+			badge.title = '이 화면 소속 주석 ' + cnt + '개';
+			row.appendChild(badge);
+		}
+		li.appendChild(row);
+		row.addEventListener('click', () => DDOverlay.gotoScreen(tab.frame, s.id)); // 목업 화면 전환 → onScreenChange 가 나머지 처리
+		screenList.appendChild(li);
+	}
 }
 
 // ---- 설명 편집기 (M4) — 선택된 핀의 자유 리치텍스트 + 5종 슬롯 -----------------

@@ -112,7 +112,8 @@ const GENERIC_SCENARIO = `(function(){
 		rows:document.querySelectorAll('#annot-list .doc-row').length,
 		importHidden:(!b||b.classList.contains('hidden')),
 		curScreen:window.currentScreenId(tab),
-		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean')
+		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean'),
+		navHidden:document.getElementById('screen-section').classList.contains('hidden')
 	};
 })()`;
 
@@ -150,6 +151,24 @@ app.whenReady().then(async () => {
 	})()`);
 	check('편집·문서 뷰 폭 동일(--ap-width 단일 변수)', rz.docFB === rz.editFB && rz.docFB === '250px', 'doc=' + rz.docFB + ' edit=' + rz.editFB);
 
+	console.log('== WS-C 화면 네비·편집 필터 ==');
+	// rz 에서 편집 모드로 전환됨. dd 화면 네비 첫 행(S1) 클릭 → gotoScreen 브리지 → 편집 패널이 S1 주석만(이슈 2).
+	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[0]) rows[0].click(); return true; })()`);
+	await wait(650);
+	const nc = await wc.executeJavaScript(`(function(){ return {
+		nav: document.querySelectorAll('#screen-list .screen-row').length,
+		badge: (document.querySelector('#screen-list .screen-row .screen-count')||{}).textContent,
+		editRows: document.querySelectorAll('#annot-list .annot-row').length,
+		cur: window.currentScreenId(window.activeTab())
+	}; })()`);
+	check('dd 화면 네비 = 2화면(S1·S2)', nc.nav === 2, 'nav=' + nc.nav);
+	check('화면별 주석 개수 배지(S1=2)', nc.badge === '2', 'badge=' + nc.badge);
+	check('편집 모드 S1 화면 필터 = 2행', nc.editRows === 2 && nc.cur === 'S1', 'rows=' + nc.editRows + ' cur=' + nc.cur);
+	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[1]) rows[1].click(); return true; })()`);
+	await wait(650);
+	const nc2 = await wc.executeJavaScript(`(function(){ return { editRows: document.querySelectorAll('#annot-list .annot-row').length, cur: window.currentScreenId(window.activeTab()) }; })()`);
+	check('편집 모드 화면 전환(S2) → 필터 1행 (이슈 2 해결)', nc2.editRows === 1 && nc2.cur === 'S2', 'rows=' + nc2.editRows + ' cur=' + nc2.cur);
+
 	console.log('== WS-B 저장 복사 (원본 보존) ==');
 	await wc.executeJavaScript(`(async function(){ window.confirm=function(){return true;}; await window.saveTab(false); return true; })()`);
 	await wait(400);
@@ -167,6 +186,7 @@ app.whenReady().then(async () => {
 	check('generic 은 초안 버튼 숨김(불변 원칙)', r2.importHidden === true);
 	check('generic curScreen = null', r2.curScreen === null || r2.curScreen === undefined, 'curScreen=' + JSON.stringify(r2.curScreen));
 	check('generic 은 clean 미적용(spec-html 아님)', r2.cleanApplied === false);
+	check('generic 은 화면 네비 숨김(화면 개념 없음)', r2.navHidden === true);
 
 	console.log('== admin 목업 (data-field 앵커·APP_DATA 없음) ==');
 	await wc.executeJavaScript(`(async function(){ window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(adminPath)}, {history:false}); return true; })()`);

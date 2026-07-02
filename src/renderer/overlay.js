@@ -47,6 +47,8 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 /* 문서 뷰 — 목업 자체 우측 화면정보(#description: 요약·화면 전환·사용법)를 숨겨 dd 설명 표와 중복 제거.
    spec-html 전용 id 라 generic 목업엔 무효(무해). area-rail·el-pin·매핑은 body.clean 이 담당. */
 body.dd-docview #description { display: none !important; }
+/* 목업 자체 좌측 화면목록(#screen-nav)은 dd 좌측 화면 네비가 대체 — clean 일 때 숨김(화면 1급화). */
+body.clean #screen-nav { display: none !important; }
 `;
 
 	// element 모드 대상 조회 — CSS.escape 폴백 포함(구형 환경 방어).
@@ -96,9 +98,15 @@ body.dd-docview #description { display: none !important; }
 		try { return !!resolveAppData(frame.contentWindow); } catch (_) { return false; }
 	}
 
-	// APP_DATA 원본 반환 — 셸의 초안 주입(M4)이 areas/elements/desc 를 읽는다. 없으면 null(generic 목업).
+	// APP_DATA 원본 반환 — 셸의 초안 주입(M4)·화면 네비(M6)가 screens/areas/elements/desc 를 읽는다. 없으면 null(generic 목업).
 	function readAppData(frame) {
 		try { return resolveAppData(frame.contentWindow); } catch (_) { return null; }
+	}
+
+	// dd → 목업 제어 — 화면 전환(M6 화면 네비). spec-html goScreen(id) 를 realm 내에서 호출(readAppData 와 같은 오리진).
+	function gotoScreen(frame, id) {
+		try { frame.contentWindow.eval("typeof goScreen==='function' && goScreen(" + JSON.stringify(String(id)) + ")"); }
+		catch (_) { /* 함수 없거나 접근 불가 — 무시 */ }
 	}
 
 	function attach(frame, set, opts) {
@@ -512,5 +520,5 @@ body.dd-docview #description { display: none !important; }
 		};
 	}
 
-	return { attach, detectSpecHtml, readAppData };
+	return { attach, detectSpecHtml, readAppData, gotoScreen };
 })();

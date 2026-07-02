@@ -591,3 +591,13 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 	.annot-list { overflow: visible; }
 	.doc-row { break-inside: avoid; }
 }
+
+/* ---- 화면 네비 (M6 화면 1급화) — recent-row 스타일 재활용 + 현재 화면 강조 + 주석 개수 배지 ---- */
+.screen-row { display: flex; align-items: center; }
+.screen-row.is-active { background: color-mix(in srgb, #7460D9 16%, transparent); }
+.screen-row.is-active .tn { font-weight: 700; color: #7460D9; }
+.screen-row .screen-count {
+	margin-left: auto; flex: 0 0 auto; min-width: 18px; height: 16px; padding: 0 5px; box-sizing: border-box;
+	display: inline-flex; align-items: center; justify-content: center;
+	background: #7460D9; color: #fff; font-size: 10px; font-weight: 700; border-radius: 999px;
+}
