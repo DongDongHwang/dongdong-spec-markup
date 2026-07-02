@@ -84,13 +84,24 @@ body{margin:0;font-family:sans-serif}.pg{padding:40px}.pg:not(.on){display:none}
 <script>function showPage(i){var ps=document.querySelectorAll('.pg');for(var k=0;k<ps.length;k++)ps[k].classList.toggle('on',k===i);}</script>
 </body></html>`;
 
+// 롱스크롤 목업 — 화면 전환 없이 세로로 긴 단일 페이지. 핀이 스크롤을 따라 콘텐츠에 붙어 이동하는지 검증.
+const LONGSCROLL_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+body{margin:0;font-family:sans-serif}.sec{padding:40px;border-bottom:1px solid #eee}
+</style></head><body>
+<div class="sec" id="ls-top" style="height:200px">상단 섹션</div>
+<div class="sec" style="height:900px">중간 여백</div>
+<div class="sec" id="ls-bot" style="height:200px">하단 섹션</div>
+</body></html>`;
+
 const specPath = path.join(TMP, 'spec-like.html');
 const storyPath = path.join(TMP, 'story-multi.html');
+const longPath = path.join(TMP, 'longscroll.html');
 const genPath = path.join(TMP, 'generic.html');
 const adminPath = path.join(TMP, 'admin.html');
 const adminNewPath = path.join(TMP, 'admin-new.html');
 fs.writeFileSync(specPath, SPEC_HTML, 'utf8');
 fs.writeFileSync(storyPath, STORY_MULTI_HTML, 'utf8');
+fs.writeFileSync(longPath, LONGSCROLL_HTML, 'utf8');
 fs.writeFileSync(genPath, GENERIC_HTML, 'utf8');
 fs.writeFileSync(adminPath, ADMIN_HTML, 'utf8');
 fs.writeFileSync(adminNewPath, ADMIN_NEW_HTML, 'utf8');
@@ -177,7 +188,7 @@ app.whenReady().then(async () => {
 	check('diff — 직접 찍은 핀 신규 배지(S1 2개)', r1.newBadges === 2, 'newBadges=' + r1.newBadges);
 
 	await wc.executeJavaScript(SWITCH_SCENARIO);
-	await wait(650); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)
+	await wait(850); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)
 	const r1b = await wc.executeJavaScript(AFTER_SWITCH);
 	check('화면 전환(S2) 시 현재 화면 인식', r1b.curScreen === 'S2', 'curScreen=' + r1b.curScreen);
 	check('화면 전환 후 표 재렌더 = S2 핀 1행', r1b.rows === 1, 'rows=' + r1b.rows);
@@ -196,7 +207,7 @@ app.whenReady().then(async () => {
 	console.log('== WS-C 화면 네비·편집 필터 ==');
 	// rz 에서 편집 모드로 전환됨. dd 화면 네비 첫 행(S1) 클릭 → gotoScreen 브리지 → 편집 패널이 S1 주석만(이슈 2).
 	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[0]) rows[0].click(); return true; })()`);
-	await wait(650);
+	await wait(850);
 	const nc = await wc.executeJavaScript(`(function(){ return {
 		nav: document.querySelectorAll('#screen-list .screen-row').length,
 		badge: (document.querySelector('#screen-list .screen-row .screen-count')||{}).textContent,
@@ -207,7 +218,7 @@ app.whenReady().then(async () => {
 	check('화면별 주석 개수 배지(S1=2)', nc.badge === '2', 'badge=' + nc.badge);
 	check('편집 모드 S1 화면 필터 = 2행', nc.editRows === 2 && nc.cur === 'S1', 'rows=' + nc.editRows + ' cur=' + nc.cur);
 	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[1]) rows[1].click(); return true; })()`);
-	await wait(650);
+	await wait(850);
 	const nc2 = await wc.executeJavaScript(`(function(){ return { editRows: document.querySelectorAll('#annot-list .annot-row').length, cur: window.currentScreenId(window.activeTab()) }; })()`);
 	check('편집 모드 화면 전환(S2) → 필터 1행 (이슈 2 해결)', nc2.editRows === 1 && nc2.cur === 'S2', 'rows=' + nc2.editRows + ' cur=' + nc2.cur);
 
@@ -299,14 +310,34 @@ app.whenReady().then(async () => {
 	check('화면0 핀 1개 — screenSel = #pg-0 감지', s1.screenSel === '#pg-0', 'screenSel=' + s1.screenSel);
 	check('화면0에서 핀 표시 = 1', s1.visible === 1, 'visible=' + s1.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(1); return true; })()`);
-	await wait(650);
+	await wait(850);
 	const s2 = await wc.executeJavaScript(`(function(){ return { visible:window.activeTab().overlay.stats().visible }; })()`);
 	check('화면1 전환 → 화면0 핀 숨김 = 0 (페이지마다 다른 주석)', s2.visible === 0, 'visible=' + s2.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(0); return true; })()`);
-	await wait(650);
+	await wait(850);
 	const s3 = await wc.executeJavaScript(`(function(){ var tab=window.activeTab(); return { visible:tab.overlay.stats().visible, cur:window.currentScreenId(tab) }; })()`);
 	check('화면0 복귀 → 핀 복원 = 1', s3.visible === 1, 'visible=' + s3.visible);
 	check('generic 현재화면 감지 = #pg-0', s3.cur === '#pg-0', 'cur=' + s3.cur);
+
+	console.log('== 롱스크롤 (긴 페이지 스크롤 추종) ==');
+	await wc.executeJavaScript(`(async function(){ window.alert=function(){};window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(longPath)}, {history:false}); return true; })()`);
+	await wait(700);
+	const ls = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); window.toggleEdit();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var el=doc.getElementById('ls-top'); var r=el.getBoundingClientRect();
+		var cx=Math.round(r.left+r.width/2), cy=Math.round(r.top+r.height/2);
+		doc.dispatchEvent(new win.MouseEvent('mousedown',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		var a=tab.annotations.annotations[0];
+		var node=doc.querySelector('#dd-overlay-root .dd-pin');
+		var before=node?node.getBoundingClientRect().top:null;
+		win.scrollTo(0,600); tab.overlay.relayout();
+		var after=node?node.getBoundingClientRect().top:null;
+		return { mode:a&&a.anchor&&a.anchor.mode, delta:(before!=null&&after!=null)?Math.round(before-after):null };
+	})()`);
+	check('롱스크롤 핀 = coord 앵커(빈 곳)', ls.mode === 'coord', 'mode=' + ls.mode);
+	check('스크롤 시 핀이 콘텐츠 따라 이동(≈600px 위로)', ls.delta >= 550 && ls.delta <= 650, 'delta=' + ls.delta);
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
