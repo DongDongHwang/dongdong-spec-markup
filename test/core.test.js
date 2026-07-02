@@ -10,6 +10,7 @@ const assert = require('assert');
 const DDModel = require('../src/core/annotation-model.js');
 const DDAnchor = require('../src/core/anchor.js');
 const DDHtmlIO = require('../src/core/html-io.js');
+const DDNumbering = require('../src/core/numbering.js');
 
 let passed = 0;
 let failed = 0;
@@ -149,6 +150,57 @@ test('html-io: dd 블록 없는 일반 목업 — set=null, pure 그대로', () 
 	const out = DDHtmlIO.extract(PURE);
 	assert.strictEqual(out.pure, PURE);
 	assert.strictEqual(out.set, null);
+});
+
+// ---- numbering -------------------------------------------------------------
+
+function numSet(n) {
+	const s = DDModel.createSet('generic');
+	for (let i = 1; i <= n; i++) {
+		DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_num00' + i, anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
+	}
+	return s;
+}
+const labels = (s) => s.annotations.map((a) => a.label);
+
+test('numbering: 추가 시 자동 다음번호 (1, 2, 3)', () => {
+	assert.deepStrictEqual(labels(numSet(3)), ['1', '2', '3']);
+});
+
+test('numbering: 삭제 시 뒤 당김 (기본) — 2 삭제 → 1, 2', () => {
+	const s = numSet(3);
+	DDNumbering.remove(s, 'an_num002');
+	assert.deepStrictEqual(labels(s), ['1', '2']);
+	assert.deepStrictEqual(s.annotations.map((a) => a.seq), [1, 2]);
+});
+
+test('numbering: 삭제 pullBack=false — 라벨 동결(구멍 유지), seq 는 압축', () => {
+	const s = numSet(3);
+	DDNumbering.remove(s, 'an_num002', { pullBack: false });
+	assert.deepStrictEqual(labels(s), ['1', '3']);
+	assert.deepStrictEqual(s.annotations.map((a) => a.seq), [1, 2]);
+	assert.ok(s.annotations.every((a) => a.autoNumber === false)); // 동결 = 수동 고정
+});
+
+test('numbering: moveTo 중간 삽입 밀기 — 3번을 1자리로 → 3이 1, 나머지 밀림', () => {
+	const s = numSet(3);
+	DDNumbering.moveTo(s, 'an_num003', 1);
+	assert.deepStrictEqual(s.annotations.map((a) => a.id), ['an_num003', 'an_num001', 'an_num002']);
+	assert.deepStrictEqual(labels(s), ['1', '2', '3']); // 자동 재번호
+});
+
+test('numbering: setLabel 수동 고정 (계층 1-1) — 재번호에 안 흔들림', () => {
+	const s = numSet(3);
+	DDNumbering.setLabel(s, 'an_num002', '1-1');
+	DDNumbering.remove(s, 'an_num001'); // 재번호 유발
+	assert.deepStrictEqual(labels(s), ['1-1', '2']); // 수동 라벨 보존, 자동만 당김
+});
+
+test('numbering: setAuto 복귀 — seq 위치 기준 재번호', () => {
+	const s = numSet(3);
+	DDNumbering.setLabel(s, 'an_num002', 'A');
+	DDNumbering.setAuto(s, 'an_num002');
+	assert.deepStrictEqual(labels(s), ['1', '2', '3']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
