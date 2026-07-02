@@ -37,6 +37,8 @@ const sidebarToggle = document.getElementById('sidebar-toggle');
 const apGutter = document.getElementById('ap-gutter');
 const apCollapse = document.getElementById('ap-collapse');
 const apReopen = document.getElementById('ap-reopen');
+const shortcutBtn = document.getElementById('shortcut-btn');
+const shortcutPopover = document.getElementById('shortcut-popover');
 const toastEl = document.getElementById('toast');
 const screenSection = document.getElementById('screen-section'); // M6 화면 네비(현재 문서의 화면 목록)
 const screenList = document.getElementById('screen-list');
@@ -69,6 +71,22 @@ function setPanelCollapsed(on) {
 }
 if (apCollapse) apCollapse.addEventListener('click', () => setPanelCollapsed(true));
 if (apReopen) apReopen.addEventListener('click', () => setPanelCollapsed(false));
+
+// ---- 단축키 안내 팝오버 (상단바) — 정적 목록, 바깥 클릭·Esc 로 닫힘 ----
+function setShortcutOpen(on) {
+	if (!shortcutPopover || !shortcutBtn) return;
+	shortcutPopover.classList.toggle('hidden', !on);
+	shortcutBtn.classList.toggle('is-on', on);
+}
+if (shortcutBtn) {
+	shortcutBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		setShortcutOpen(shortcutPopover.classList.contains('hidden'));
+	});
+	if (shortcutPopover) shortcutPopover.addEventListener('click', (e) => e.stopPropagation());
+	document.addEventListener('click', () => setShortcutOpen(false));
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setShortcutOpen(false); });
+}
 
 // 주석 패널 폭 드래그 — --ap-width 조절(최소 200 / 최대 창의 60%).
 if (apGutter) {

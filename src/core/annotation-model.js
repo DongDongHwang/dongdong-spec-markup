@@ -10,12 +10,39 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	const DD_VERSION = 2;               // v2 — 사용자 지정 마킹(mark) 필드 도입. v1 저장본은 migrate 로 승격.
+	const DD_VERSION = 3;               // v3 — 부모-자식 계층(parentId) 도입. v1(마킹없음)·v2(계층없음)는 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
 	const TYPES = ['pin', 'box'];
 	const ANCHOR_MODES = ['element', 'coord'];
 	const SOURCE_KINDS = ['spec-html', 'generic'];
 	const MARK_KINDS = ['신규', '기존'];  // 사용자가 핀마다 직접 지정. 신규는 차수(phase)로 2·3차 확장.
+
+	// ---- 색 SSOT — 오버레이·저장본 런타임·목록이 공유. "색은 계속 달라야 한다"(동동이) → 차수·그룹 모두 팔레트 순환. ----
+	// 차수색 — 신규 1·2·3차…가 서로 다른 색(과거엔 2·3차가 같은 황색이었음). 4차 이상도 팔레트 순환으로 계속 다름.
+	const PHASE_PALETTE = ['#18a558', '#D97706', '#0891B2', '#7C3AED', '#DB2777', '#CA8A04', '#0D9488', '#DC2626'];
+	const MODIFIED_COLOR = '#E08600';   // 수정(draft 편집)
+	const UNCHANGED_COLOR = '#6B7280';  // 기존(회색)
+	// 그룹색 — 1-A·1-B 연관 묶음마다 다른 색(부모 id 해시). 렌더러가 "그룹의 일원"인 핀에만 적용.
+	const GROUP_PALETTE = ['#7C3AED', '#EA580C', '#0891B2', '#DB2777', '#65A30D', '#2563EB', '#C026D3', '#0D9488'];
+
+	function phaseColor(phase) {
+		const p = (typeof phase === 'number' && phase >= 1) ? Math.floor(phase) : 1;
+		return PHASE_PALETTE[(p - 1) % PHASE_PALETTE.length];
+	}
+	// 상태색 — new 는 차수색, modified 주황, unchanged(기존) 회색. 핀 배경·배지·날짜/사유 텍스트가 이 색을 쓴다.
+	function statusColor(a) {
+		const st = annotStatus(a);
+		if (st === 'modified') return MODIFIED_COLOR;
+		if (st === 'unchanged') return UNCHANGED_COLOR;
+		return phaseColor(a && a.mark && a.mark.phase ? a.mark.phase : 1);
+	}
+	// 그룹색 — key(부모 id) 해시로 팔레트 인덱스. key 없으면 null(그룹 테두리 없음).
+	function groupColorForKey(key) {
+		if (!key) return null;
+		let h = 0;
+		for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+		return GROUP_PALETTE[h % GROUP_PALETTE.length];
+	}
 
 	// 주석 id — 'an_' + base36 6자. rng 주입 가능(테스트 재현성).
 	function genId(rng) {
@@ -45,6 +72,7 @@
 			seq: typeof p.seq === 'number' ? p.seq : 1,
 			label: p.label != null ? String(p.label) : '1',
 			autoNumber: p.autoNumber !== false,
+			parentId: p.parentId != null ? String(p.parentId) : null, // 1단계 계층 — 부모 핀 id(자식이면). null=최상위
 			anchor: p.anchor || null,   // { mode:'element', elementId, screenId?, offsetPct?, rectPct? }
 			coord: p.coord || null,     // { basis:'frame'|'body', x, y, w?, h? }  (mode='coord' 전용)
 			style: p.style || { variant: 'solid', color: '#7460D9' },
@@ -85,10 +113,11 @@
 		return { status, label, tooltip: parts.join(' · ') };
 	}
 
-	// 저장본 로드 시 스키마 승격 — v1(마킹 개념 없음) → v2. 데이터 손실 없음(annotStatus 가 origin 폴백).
+	// 저장본 로드 시 스키마 승격 — v1(마킹 없음)·v2(계층 없음) → v3. 데이터 손실 없음.
+	//   parentId 키가 없는 옛 주석은 렌더가 a.parentId 를 옵셔널(undefined=최상위)로 읽어 그대로 동작 — 버전만 올린다.
 	function migrate(set) {
 		if (!set || typeof set !== 'object') return set;
-		if (set.ddVersion === 1) set.ddVersion = DD_VERSION;
+		if (typeof set.ddVersion === 'number' && set.ddVersion < DD_VERSION) set.ddVersion = DD_VERSION;
 		return set;
 	}
 
@@ -105,6 +134,7 @@
 		if (!TYPES.includes(a.type)) errs.push(`${at}.type: ${TYPES.join('|')} 중 하나여야 함`);
 		if (typeof a.seq !== 'number') errs.push(`${at}.seq: 숫자 필수`);
 		if (typeof a.label !== 'string') errs.push(`${at}.label: 문자열 필수`);
+		if (a.parentId != null && typeof a.parentId !== 'string') errs.push(`${at}.parentId: 문자열|null 이어야 함`);
 		const mode = a.anchor && a.anchor.mode;
 		if (!ANCHOR_MODES.includes(mode)) {
 			errs.push(`${at}.anchor.mode: ${ANCHOR_MODES.join('|')} 중 하나여야 함`);
@@ -150,5 +180,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus, annotBadge, migrate };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate };
 });

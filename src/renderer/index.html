@@ -12,7 +12,39 @@
 			<div class="brand">Dong Dong Spec Markup <span class="badge">Windows · M5.5</span></div>
 			<div id="docpath" class="docpath"></div>
 			<div id="actions" class="actions">
-				<button id="sidebar-toggle" type="button" title="사이드바 접기/펼치기 (Ctrl+B)">◧ 사이드바</button>
+				<span class="sc-wrap">
+					<button id="shortcut-btn" type="button" title="단축키 안내 보기">⌨ 단축키</button>
+					<div id="shortcut-popover" class="sc-popover hidden">
+						<div class="sc-col">
+							<div class="sc-cap">보기 · 파일</div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>E</kbd><span>주석 편집</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd><span>문서 뷰</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd><span>사이드바</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>S</kbd><span>저장 (<kbd>Shift</kbd> 다른 이름)</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>\</kbd><span>분할</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>N</kbd><span>새 창</span></div>
+							<div class="sc-row"><kbd>Alt</kbd><kbd>←</kbd><kbd>→</kbd><span>뒤로 · 앞으로</span></div>
+						</div>
+						<div class="sc-col">
+							<div class="sc-cap">핀 · 박스</div>
+							<div class="sc-row"><span class="sc-act">클릭</span><span>핀 찍기</span></div>
+							<div class="sc-row"><span class="sc-act">드래그</span><span>박스(네모) 그리기</span></div>
+							<div class="sc-row"><kbd>←↑↓→</kbd><span>미세 이동 (<kbd>Shift</kbd> 크게)</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>D</kbd><span>복제</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>C</kbd><kbd>V</kbd><span>복사 · 붙여넣기</span></div>
+							<div class="sc-row"><kbd>Delete</kbd><span>삭제</span></div>
+						</div>
+						<div class="sc-col">
+							<div class="sc-cap">번호 · 설명</div>
+							<div class="sc-row"><span class="sc-act">행 더블클릭</span><span>번호 수정</span></div>
+							<div class="sc-row"><span class="sc-act">행 드래그</span><span>재정렬</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>B</kbd><span>설명 굵게</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>Z</kbd><span>되돌리기</span></div>
+							<div class="sc-row"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd><span>다시 실행</span></div>
+						</div>
+					</div>
+				</span>
+				<button id="sidebar-toggle" type="button" title="사이드바 접기/펼치기 (Ctrl+Shift+B)">◧ 사이드바</button>
 				<button id="edit-btn" type="button" disabled title="주석 편집 — 클릭 = 핀 · 드래그 = 박스 (Ctrl+E)">✏ 주석 편집</button>
 				<button id="doc-btn" type="button" disabled title="문서 뷰 — 목업 + 우측 번호·설명 표(읽기 전용, 1세대 기획서 포맷) (Ctrl+D)">📄 문서 뷰</button>
 				<button id="save-btn" type="button" disabled title="주석 저장 — 원본에 주석을 심어 저장 (Ctrl+S) · Shift = 다른 이름으로">💾 저장</button>
@@ -84,7 +116,7 @@
 					<div id="apd-editor" class="apd-editor" contenteditable="true" data-placeholder="핀 설명을 입력하세요…"></div>
 					<div id="apd-slots" class="apd-slots hidden"></div>
 				</section>
-				<div class="ap-hint">편집 모드 — 목업 클릭 = 핀 · 드래그 = 박스 · 핀 드래그/화살표 = 이동<br />Ctrl+D = 복제 · Ctrl+C/V = 복사·붙여넣기 · Delete = 삭제 · Ctrl+Z = 되돌리기<br />행 더블클릭 = 번호 수정 · 행 드래그 = 재정렬 · 화면 이동은 편집을 끄고 하세요.</div>
+				<div class="ap-hint">클릭 = 핀 · 드래그 = 박스 · 화면 이동은 편집을 끄고 · 전체 단축키는 상단바 <b>⌨ 단축키</b></div>
 			</aside>
 			<button id="ap-reopen" type="button" class="ap-reopen hidden" title="주석 패널 펼치기">📌 주석</button>
 		</div>

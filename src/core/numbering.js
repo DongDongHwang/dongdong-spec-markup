@@ -15,14 +15,38 @@
 		return set.annotations.slice().sort((a, b) => a.seq - b.seq);
 	}
 
-	// 불변식 복구 — seq 1..n 연속(기존 seq 순서 보존) + autoNumber 라벨 = String(seq).
+	// 자식 순번 → 알파벳(1→A, 2→B … 27→AA). 1-A·1-B 계층 라벨용.
+	function letter(n) {
+		let s = '';
+		while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+		return s;
+	}
+
+	// 계층 라벨 재계산 — 최상위(부모 없음/고아)는 정수, 자식은 "부모라벨-A/B". 수동 고정(autoNumber=false)은 안 건드림.
+	//   계층이 하나도 없으면 전부 최상위라 label = 1,2,3… (기존 동작과 동일 — 하위호환).
+	function relabel(set) {
+		const byId = {};
+		set.annotations.forEach((a) => { byId[a.id] = a; });
+		const isTop = (a) => !a.parentId || !byId[a.parentId];
+		const sorted = sortedBySeq(set);
+		let top = 0;
+		sorted.forEach((a) => { if (isTop(a)) { top++; if (a.autoNumber) a.label = String(top); } });
+		const childCount = {};
+		sorted.forEach((a) => {
+			if (isTop(a) || !a.autoNumber) return;
+			const parent = byId[a.parentId];
+			const prefix = parent ? parent.label : '?';
+			childCount[a.parentId] = (childCount[a.parentId] || 0) + 1;
+			a.label = prefix + '-' + letter(childCount[a.parentId]);
+		});
+	}
+
+	// 불변식 복구 — seq 1..n 연속(기존 seq 순서 보존) + 계층 라벨 재계산.
 	function normalize(set) {
 		const sorted = sortedBySeq(set);
-		sorted.forEach((a, i) => {
-			a.seq = i + 1;
-			if (a.autoNumber) a.label = String(a.seq);
-		});
+		sorted.forEach((a, i) => { a.seq = i + 1; });
 		set.annotations = sorted;
+		relabel(set);
 		return set;
 	}
 
@@ -76,5 +100,43 @@
 		return normalize(set);
 	}
 
-	return { sortedBySeq, normalize, add, remove, moveTo, setLabel, setAuto };
+	// 부모 지정 — id 를 parentId 의 자식(1-A…)으로. parentId=null 이면 최상위로 승격.
+	//   1단계 계층만 — 이미 자식을 가진 핀은 부모가 될 수 없고(자식의 자식 금지), 자기 자신도 불가.
+	//   자식은 부모 및 부모의 기존 자식들 바로 뒤 seq 로 이동(목록에서 가족이 인접).
+	function setParent(set, id, parentId) {
+		const a = set.annotations.find((x) => x.id === id);
+		if (!a || id === parentId) return set;
+		if (parentId) {
+			const parent = set.annotations.find((x) => x.id === parentId);
+			if (!parent) return set;
+			if (parent.parentId) return set;                         // 부모가 이미 자식 → 2단계 금지
+			if (set.annotations.some((x) => x.parentId === id)) return set; // 내가 이미 부모 → 자식으로 못 감
+			a.parentId = parentId;
+			a.autoNumber = true;
+			const sorted = sortedBySeq(set).filter((x) => x.id !== id);
+			let insertAt = sorted.length;
+			for (let i = 0; i < sorted.length; i++) {
+				const x = sorted[i];
+				if (x.id === parentId || x.parentId === parentId) insertAt = i + 1;
+			}
+			sorted.splice(insertAt, 0, a);
+			sorted.forEach((x, i) => { x.seq = i + 1; });
+			set.annotations = sorted;
+		} else {
+			a.parentId = null;
+			a.autoNumber = true;
+		}
+		return normalize(set);
+	}
+
+	// 그룹 헬퍼(색용) — 자식이거나 자식을 가진 부모면 "그룹의 일원". 그룹키 = 부모 id(부모·자식 공통).
+	function childrenOf(set, id) { return set.annotations.filter((x) => x.parentId === id); }
+	function isGrouped(set, a) {
+		if (!a) return false;
+		if (a.parentId && set.annotations.some((x) => x.id === a.parentId)) return true;
+		return set.annotations.some((x) => x.parentId === a.id);
+	}
+	function groupKey(a) { return a && a.parentId ? a.parentId : (a ? a.id : null); }
+
+	return { sortedBySeq, normalize, add, remove, moveTo, setLabel, setAuto, setParent, childrenOf, isGrouped, groupKey };
 });

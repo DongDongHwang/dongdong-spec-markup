@@ -415,6 +415,33 @@ kbd {
 #topbar .actions #save-btn:not(:disabled) { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 #topbar .actions #save-btn:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 85%, #000); }
 
+/* ---- 단축키 안내 팝오버 (상단바) ---- */
+.sc-wrap { position: relative; display: inline-flex; }
+#shortcut-btn.is-on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.sc-popover {
+	position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+	display: flex; gap: 20px;
+	padding: 14px 18px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	box-shadow: 0 8px 28px rgba(0, 0, 0, .2);
+	white-space: nowrap;
+	cursor: default;
+}
+.sc-col { display: flex; flex-direction: column; gap: 7px; }
+.sc-cap { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.sc-row { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg); }
+.sc-row > span:last-child { margin-left: 3px; color: var(--muted); }
+.sc-act { font-size: 10.5px; font-weight: 600; color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+.sc-popover kbd {
+	font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; line-height: 1.4;
+	min-width: 18px; text-align: center;
+	padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px;
+	border-radius: 4px; background: var(--code-bg); color: var(--fg);
+}
+.sc-row > span kbd { min-width: 0; border-bottom-width: 1px; }
+
 /* ---- 주석 패널 (M3 번호 자유관리) ---- */
 #topbar .actions #edit-btn.is-on { color: #fff; background: #7460D9; border-color: #7460D9; }
 .annot-panel {

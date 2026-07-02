@@ -36,7 +36,7 @@ test('model: genId 형식 + rng 주입 재현성', () => {
 
 test('model: createSet 기본값 + source.kind 방어', () => {
 	const s = DDModel.createSet('spec-html');
-	assert.strictEqual(s.ddVersion, 2);
+	assert.strictEqual(s.ddVersion, 3);
 	assert.strictEqual(s.source.kind, 'spec-html');
 	assert.deepStrictEqual(s.annotations, []);
 	assert.strictEqual(DDModel.createSet('이상한값').source.kind, 'generic');
@@ -112,11 +112,13 @@ test('model: mark 형태 검증 — 잘못된 kind/phase 적발, 미지정(null)
 	assert.ok(v.errors.some((e) => e.includes('mark.phase')));
 });
 
-test('model: migrate v1 → v2 (마킹 없는 옛 저장본 무손실 승격)', () => {
+test('model: migrate v1·v2 → v3 (옛 저장본 무손실 승격)', () => {
 	const v1 = { ddVersion: 1, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
-	const out = DDModel.migrate(v1);
-	assert.strictEqual(out.ddVersion, 2);
-	assert.strictEqual(DDModel.validateSet(out).ok, true); // 승격 후 v2 스키마 통과
+	const out1 = DDModel.migrate(v1);
+	assert.strictEqual(out1.ddVersion, 3);
+	assert.strictEqual(DDModel.validateSet(out1).ok, true); // 승격 후 v3 스키마 통과
+	const v2 = { ddVersion: 2, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
+	assert.strictEqual(DDModel.migrate(v2).ddVersion, 3);
 });
 
 // ---- anchor ----------------------------------------------------------------
@@ -307,6 +309,39 @@ test('numbering: 복제(clone + add) — 새 id·다음 seq·mark 승계', () =>
 	assert.notStrictEqual(clone.id, src.id);      // 새 id
 	assert.deepStrictEqual(clone.mark, src.mark); // 마킹 승계
 	assert.strictEqual(DDModel.validateSet(s).ok, true); // id 중복 없음
+});
+
+test('numbering: setParent 계층 — 자식은 부모라벨-A/B, 가족 인접', () => {
+	const s = numSet(3); // 1, 2, 3
+	DDNumbering.setParent(s, 'an_num003', 'an_num001'); // 3 → 1 의 자식
+	assert.deepStrictEqual(labels(s), ['1', '1-A', '2']); // 자식이 부모 뒤로, 나머지 재번호
+	const secondTop = s.annotations.find((a) => a.label === '2');
+	DDNumbering.setParent(s, secondTop.id, 'an_num001'); // 2번째 최상위도 1 의 자식
+	assert.deepStrictEqual(labels(s), ['1', '1-A', '1-B']);
+});
+
+test('numbering: 부모 삭제 시 자식 최상위 승격(고아)', () => {
+	const s = numSet(2);
+	DDNumbering.setParent(s, 'an_num002', 'an_num001'); // 1, 1-A
+	assert.deepStrictEqual(labels(s), ['1', '1-A']);
+	DDNumbering.remove(s, 'an_num001', { pullBack: true }); // 부모 삭제 → 자식은 고아
+	assert.deepStrictEqual(labels(s), ['1']);
+});
+
+test('numbering: 2단계 계층 금지 — 자식의 자식 불가', () => {
+	const s = numSet(3);
+	DDNumbering.setParent(s, 'an_num002', 'an_num001'); // 2 → 1-A
+	DDNumbering.setParent(s, 'an_num003', 'an_num002'); // 자식(002)의 자식 시도 → 거부
+	assert.strictEqual(s.annotations.find((a) => a.id === 'an_num003').parentId, null);
+});
+
+test('model: 색 SSOT — 차수별 다름·그룹색·상태색', () => {
+	assert.notStrictEqual(DDModel.phaseColor(1), DDModel.phaseColor(2));
+	assert.notStrictEqual(DDModel.phaseColor(2), DDModel.phaseColor(3)); // 2·3차 이제 서로 다름
+	assert.strictEqual(DDModel.groupColorForKey(null), null);            // 그룹 없으면 색 없음
+	assert.strictEqual(typeof DDModel.groupColorForKey('an_x'), 'string');
+	assert.strictEqual(DDModel.statusColor({ mark: { kind: '신규', phase: 2 } }), DDModel.phaseColor(2)); // 신규=차수색
+	assert.strictEqual(DDModel.statusColor({ mark: { kind: '기존' } }), '#6B7280'); // 기존=회색
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
