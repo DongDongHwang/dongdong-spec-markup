@@ -1,14 +1,15 @@
 // 코어 로직 동작 테스트 — 외부 프레임워크 없이 node 내장 assert 로 돌린다.  실행:  node test/core.test.js
-// M1(iframe 뷰어)에는 아직 순수 로직 모듈이 없다(렌더는 Electron/iframe DOM). 순수 코어 테스트는
-// M3~M5 에서 신설되는 src/core/{annotation-model,html-io,anchor}.js 를 대상으로 채워진다.
-//   - html-io  : embed/extract 왕복 항등(extract(embed(pure,ann))==={pure,ann}) + 멱등(embed(embed(x))===embed(x))
-//   - anchor   : element↔coord 비율 변환
-//   - annotation-model : 스키마 검증·id 생성
-// 아래 test() 하네스를 그대로 재사용한다.
+// 대상 = src/core/{annotation-model,anchor,html-io}.js (M2 신설. html-io 는 M5 조기 착수분).
+//   - annotation-model : 스키마 생성·검증·id 생성
+//   - anchor           : element/coord 절대↔비율 변환 (왕복 대칭 포함)
+//   - html-io          : embed/extract 왕복 항등 + 멱등 + </script> 이스케이프
 
 'use strict';
 
 const assert = require('assert');
+const DDModel = require('../src/core/annotation-model.js');
+const DDAnchor = require('../src/core/anchor.js');
+const DDHtmlIO = require('../src/core/html-io.js');
 
 let passed = 0;
 let failed = 0;
@@ -23,9 +24,131 @@ function test(name, fn) {
 	}
 }
 
-// M1 스모크 — 하네스 자체가 동작하는지 (신규 core 모듈이 붙기 전 골격 유지용).
-test('test harness sanity', () => {
-	assert.strictEqual(1 + 1, 2);
+// ---- annotation-model ------------------------------------------------------
+
+test('model: genId 형식 + rng 주입 재현성', () => {
+	assert.match(DDModel.genId(), /^an_[0-9a-z]{6}$/);
+	const fixed = () => 0.5;
+	assert.strictEqual(DDModel.genId(fixed), DDModel.genId(fixed)); // 같은 rng → 같은 id
+});
+
+test('model: createSet 기본값 + source.kind 방어', () => {
+	const s = DDModel.createSet('spec-html');
+	assert.strictEqual(s.ddVersion, 1);
+	assert.strictEqual(s.source.kind, 'spec-html');
+	assert.deepStrictEqual(s.annotations, []);
+	assert.strictEqual(DDModel.createSet('이상한값').source.kind, 'generic');
+});
+
+test('model: 정상 세트 검증 통과 (element 핀 + coord 박스)', () => {
+	const s = DDModel.createSet('spec-html');
+	s.annotations.push(DDModel.createAnnotation({
+		id: 'an_aaa111', seq: 1, label: '1',
+		anchor: { mode: 'element', elementId: 'LGN-LOG-001-BD-BTN-001', screenId: 'LGN-LOG-001', offsetPct: { dx: 0.5, dy: 0 } },
+	}));
+	s.annotations.push(DDModel.createAnnotation({
+		id: 'an_bbb222', type: 'box', seq: 2, label: '2',
+		anchor: { mode: 'coord' },
+		coord: { basis: 'frame', x: 0.1, y: 0.2, w: 0.5, h: 0.1 },
+	}));
+	const v = DDModel.validateSet(s);
+	assert.strictEqual(v.ok, true, v.errors.join(' / '));
+});
+
+test('model: 오류 검출 — elementId 누락·coord 박스 w/h 누락·id 중복', () => {
+	const s = DDModel.createSet('generic');
+	s.annotations.push(DDModel.createAnnotation({ id: 'an_dup111', anchor: { mode: 'element' } })); // elementId 없음
+	s.annotations.push(DDModel.createAnnotation({ id: 'an_dup111', type: 'box', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } })); // w/h 없음 + id 중복
+	const v = DDModel.validateSet(s);
+	assert.strictEqual(v.ok, false);
+	assert.ok(v.errors.some((e) => e.includes('elementId')));
+	assert.ok(v.errors.some((e) => e.includes('w/h')));
+	assert.ok(v.errors.some((e) => e.includes('중복')));
+});
+
+// ---- anchor ----------------------------------------------------------------
+
+const RECT = { left: 100, top: 200, width: 300, height: 60 }; // 요소/기준 렉트 예시
+
+test('anchor: pinPointFromElement — 기본 오프셋(상단 중앙)과 명시 오프셋', () => {
+	assert.deepStrictEqual(DDAnchor.pinPointFromElement(RECT, null), { left: 250, top: 200 });
+	assert.deepStrictEqual(DDAnchor.pinPointFromElement(RECT, { dx: 0, dy: 1 }), { left: 100, top: 260 });
+});
+
+test('anchor: boxRectFromElement — rectPct 없으면 요소 전체', () => {
+	assert.deepStrictEqual(DDAnchor.boxRectFromElement(RECT, null), { left: 100, top: 200, width: 300, height: 60 });
+	assert.deepStrictEqual(DDAnchor.boxRectFromElement(RECT, { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }), { left: 250, top: 230, width: 150, height: 30 });
+});
+
+test('anchor: rectFromCoord ↔ coordFromRect 왕복 대칭', () => {
+	const coord = { basis: 'frame', x: 0.25, y: 0.5, w: 0.4, h: 0.2 };
+	const abs = DDAnchor.rectFromCoord(coord, RECT);
+	const back = DDAnchor.coordFromRect(abs, RECT);
+	assert.ok(Math.abs(back.x - coord.x) < 1e-9 && Math.abs(back.y - coord.y) < 1e-9);
+	assert.ok(Math.abs(back.w - coord.w) < 1e-9 && Math.abs(back.h - coord.h) < 1e-9);
+});
+
+test('anchor: coordFromPoint — 0 나눗셈 가드', () => {
+	const zero = { left: 0, top: 0, width: 0, height: 0 };
+	assert.deepStrictEqual(DDAnchor.coordFromPoint({ left: 50, top: 50 }, zero), { x: 0, y: 0 });
+});
+
+test('anchor: offsetPctFromPoint — 요소 밖 클램프', () => {
+	const o = DDAnchor.offsetPctFromPoint({ left: 9999, top: -9999 }, RECT);
+	assert.strictEqual(o.dx, 1);
+	assert.strictEqual(o.dy, 0);
+});
+
+// ---- html-io ---------------------------------------------------------------
+
+const PURE = '<!DOCTYPE html>\n<html><head><title>목업</title></head>\n<body>\n<div class="mobile-frame">UI</div>\n<script>const APP_DATA={};</script>\n</body>\n</html>\n';
+
+function sampleSet() {
+	const s = DDModel.createSet('spec-html');
+	s.annotations.push(DDModel.createAnnotation({
+		id: 'an_test01', seq: 1, label: '1-1',
+		anchor: { mode: 'element', elementId: 'X-Y-001', offsetPct: { dx: 0.5, dy: 0 } },
+		body: { format: 'html', html: '<p>설명 with </scr' + 'ipt> 함정</p>', plain: '설명' },
+	}));
+	return s;
+}
+
+test('html-io: 왕복 항등 — extract(embed(pure, set)) === { pure, set }', () => {
+	const set = sampleSet();
+	const embedded = DDHtmlIO.embed(PURE, set);
+	const out = DDHtmlIO.extract(embedded);
+	assert.strictEqual(out.pure, PURE); // 원본 한 글자도 안 바뀜
+	assert.deepStrictEqual(out.set, set);
+});
+
+test('html-io: 멱등 — embed(embed(x)) 에 dd 블록 1세트만', () => {
+	const set = sampleSet();
+	const once = DDHtmlIO.embed(PURE, set);
+	const twice = DDHtmlIO.embed(once, set);
+	assert.strictEqual(twice, once);
+	assert.strictEqual(twice.split(DDHtmlIO.BEGIN).length - 1, 1);
+});
+
+test('html-io: 본문 </script> 이스케이프 — 블록이 조기 종료되지 않는다', () => {
+	const embedded = DDHtmlIO.embed(PURE, sampleSet());
+	const m = embedded.match(/<script type="application\/json" id="dd-annotations">([\s\S]*?)<\/script>/);
+	assert.ok(m, 'dd-annotations 블록 존재');
+	assert.ok(!m[1].includes('</'), 'JSON 안에 리터럴 </ 없음(\\u003c 이스케이프)');
+	assert.ok(DDHtmlIO.extract(embedded).set.annotations[0].body.html.includes('</scr' + 'ipt>'));
+});
+
+test('html-io: </body> 없는 문서 — 끝에 append + 왕복 유지', () => {
+	const noBody = '<div>fragment</div>';
+	const embedded = DDHtmlIO.embed(noBody, sampleSet());
+	const out = DDHtmlIO.extract(embedded);
+	assert.strictEqual(out.pure, noBody + '\n'); // 삽입 위한 개행 1개만 추가(멱등 유지)
+	assert.strictEqual(DDHtmlIO.embed(embedded, sampleSet()), embedded);
+});
+
+test('html-io: dd 블록 없는 일반 목업 — set=null, pure 그대로', () => {
+	const out = DDHtmlIO.extract(PURE);
+	assert.strictEqual(out.pure, PURE);
+	assert.strictEqual(out.set, null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

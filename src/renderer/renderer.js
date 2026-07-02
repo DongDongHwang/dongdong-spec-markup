@@ -81,11 +81,11 @@ function createTab(group) {
 	welcomeEl.innerHTML = WELCOME_HTML;
 	const frame = document.createElement('iframe');
 	frame.className = 'doc-frame hidden'; // 문서 로드 전엔 숨김(웰컴만 표시)
-	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이 주입 M2 대비). 네비 가드는 load 에서.
-	frame.addEventListener('load', () => guardIframeNav(frame));
+	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이를 iframe 문서 내부에 주입). 네비 가드·오버레이는 load 에서.
+	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); });
 	contentEl.append(welcomeEl, frame);
 	const tab = {
-		id, groupId: group.id, docPath: '', raw: '', exists: true,
+		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
 		contentEl, welcomeEl, frame,
 		navHistory: [], navIndex: -1,
 	};
@@ -112,6 +112,15 @@ function guardIframeNav(frame) {
 		}
 		e.preventDefault(); // 상대·파일 경로 이동 차단(srcdoc 문서가 빈 페이지로 튀지 않게)
 	}, true);
+}
+
+// 오버레이 부착 (M2 읽기전용) — 문서 load 마다 이전 컨트롤러를 버리고 새 문서에 다시 심는다.
+// 주석 세트가 없는 문서(일반 목업)는 아무것도 안 심는다 — 목업 원형 그대로.
+function attachOverlay(tab) {
+	if (tab.overlay) { tab.overlay.detach(); tab.overlay = null; }
+	const set = tab.annotations;
+	if (!set || !Array.isArray(set.annotations) || set.annotations.length === 0) return;
+	tab.overlay = DDOverlay.attach(tab.frame, set);
 }
 
 // 활성 그룹 전환 (시각 강조·topbar 반영)
@@ -201,9 +210,12 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	}
 	tab.docPath = doc.filePath || filePath;
 	tab.raw = doc.raw || ''; // 원본 HTML 전체 (무손상)
+	const io = window.DDHtmlIO.extract(tab.raw); // 재개봉 — dd 블록 분리(중복 누적 방지). 없으면 set=null
+	tab.pure = io.pure;
+	tab.annotations = io.set;
 	tab.exists = true;
 	if (opts.history !== false) pushTabHistory(tab, tab.docPath);
-	tab.frame.srcdoc = tab.raw; // iframe 격리 렌더 — load 시 네비 가드 재적용
+	tab.frame.srcdoc = tab.pure; // iframe 격리 렌더(순수 목업) — load 시 네비 가드+오버레이 재부착
 	renderTabView(tab);
 	showTab(groupOf(tab), tab.id);
 	syncTopbar();

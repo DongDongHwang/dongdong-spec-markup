@@ -9,7 +9,7 @@
 	</head>
 	<body>
 		<header id="topbar">
-			<div class="brand">Dong Dong Spec Viewer <span class="badge">Windows · M1</span></div>
+			<div class="brand">Dong Dong Spec Viewer <span class="badge">Windows · M2</span></div>
 			<div id="docpath" class="docpath"></div>
 			<div id="actions" class="actions">
 				<button id="newwin-btn" type="button" title="새 창 — 지금 폴더를 새 창에서 (Ctrl+N)">⧉ 새 창</button>
@@ -37,6 +37,10 @@
 			<div id="panes" class="panes"></div>
 		</div>
 		<div id="drop-overlay" class="drop-overlay hidden"><span>여기에 .md 파일이나 폴더를 놓으세요</span></div>
+		<!-- core 순수 모듈(UMD) → 오버레이 → 셸 순서 (오버레이가 DDAnchor, 셸이 DDHtmlIO·DDOverlay 참조) -->
+		<script src="../core/anchor.js"></script>
+		<script src="../core/html-io.js"></script>
+		<script src="overlay.js"></script>
 		<script src="renderer.js"></script>
 	</body>
 </html>
