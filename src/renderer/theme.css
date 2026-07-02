@@ -494,6 +494,17 @@ kbd {
 .apd-name { flex: 1 1 auto; font-size: 12px; font-weight: 600; }
 .apd-slots-btn { border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 4px; font-size: 11px; padding: 2px 7px; cursor: pointer; }
 .apd-slots-btn.is-on { border-color: #7460D9; color: #fff; background: #7460D9; }
+/* 마킹 — 신규/기존 토글 + 차수·날짜·사유(신규일 때만) */
+.apd-mark { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+.apd-mark-cap { font-size: 10.5px; font-weight: 700; color: var(--muted); }
+.apd-mk-btn { border: 1px solid var(--border); background: var(--bg); color: var(--muted); border-radius: 4px; font-size: 11px; padding: 2px 9px; cursor: pointer; }
+.apd-mk-btn:hover { border-color: #7460D9; }
+#apd-mk-new.is-on { border-color: #18a558; background: #18a558; color: #fff; }
+#apd-mk-old.is-on { border-color: #7460D9; background: #7460D9; color: #fff; }
+.apd-mark-extra { display: inline-flex; align-items: center; gap: 4px; flex: 1 1 100%; }
+.apd-mk-phase, .apd-mk-date { border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 4px; font-size: 11px; padding: 2px 5px; }
+.apd-mk-reason { flex: 1 1 auto; min-width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 4px; font-size: 11px; padding: 2px 6px; }
+.apd-mk-reason:focus, .apd-mk-date:focus, .apd-mk-phase:focus { outline: none; border-color: #7460D9; }
 .apd-toolbar { display: flex; gap: 4px; }
 .apd-toolbar button { width: 26px; height: 24px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 1; }
 .apd-toolbar button:hover { border-color: #7460D9; }
@@ -606,3 +617,4 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 .st-badge { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; white-space: nowrap; }
 .st-badge.st-new { background: color-mix(in srgb, #18a558 18%, var(--bg)); color: #18a558; }
 .st-badge.st-modified { background: color-mix(in srgb, #e08600 22%, var(--bg)); color: #c26f00; }
+.st-badge.st-new.st-phase { background: color-mix(in srgb, #D97706 22%, var(--bg)); color: #b45309; } /* 신규 2·3차 — 볼트 phase 황색 */

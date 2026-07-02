@@ -60,6 +60,20 @@
 						<span class="apd-name" id="apd-name">설명</span>
 						<button id="apd-slots-btn" type="button" class="apd-slots-btn" title="5종 설명 슬롯(기능/동작/데이터/비즈니스/기술)으로 채우기">▤ 슬롯</button>
 					</div>
+					<div class="apd-mark" id="apd-mark">
+						<span class="apd-mark-cap">마킹</span>
+						<button type="button" id="apd-mk-new" class="apd-mk-btn" data-kind="신규" title="이번 차수에 새로 추가된 요소">신규</button>
+						<button type="button" id="apd-mk-old" class="apd-mk-btn" data-kind="기존" title="기존(재사용) 요소">기존</button>
+						<span class="apd-mark-extra hidden" id="apd-mark-extra">
+							<select id="apd-mk-phase" class="apd-mk-phase" title="추가된 차수">
+								<option value="1">1차</option>
+								<option value="2">2차</option>
+								<option value="3">3차</option>
+							</select>
+							<input type="date" id="apd-mk-date" class="apd-mk-date" title="언제 추가됐는지" />
+							<input type="text" id="apd-mk-reason" class="apd-mk-reason" placeholder="추가 사유(선택)" title="왜 추가됐는지" />
+						</span>
+					</div>
 					<div class="apd-toolbar">
 						<button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
 						<button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
@@ -70,7 +84,7 @@
 					<div id="apd-editor" class="apd-editor" contenteditable="true" data-placeholder="핀 설명을 입력하세요…"></div>
 					<div id="apd-slots" class="apd-slots hidden"></div>
 				</section>
-				<div class="ap-hint">편집 모드 — 목업 클릭 = 핀 · 드래그 = 박스 · 핀 드래그 = 이동<br />행 더블클릭 = 번호 수정 · 행 드래그 = 재정렬 · Delete = 삭제<br />화면 이동(goScreen)은 편집을 끄고 하세요.</div>
+				<div class="ap-hint">편집 모드 — 목업 클릭 = 핀 · 드래그 = 박스 · 핀 드래그/화살표 = 이동<br />Ctrl+D = 복제 · Ctrl+C/V = 복사·붙여넣기 · Delete = 삭제 · Ctrl+Z = 되돌리기<br />행 더블클릭 = 번호 수정 · 행 드래그 = 재정렬 · 화면 이동은 편집을 끄고 하세요.</div>
 			</aside>
 			<button id="ap-reopen" type="button" class="ap-reopen hidden" title="주석 패널 펼치기">📌 주석</button>
 		</div>

@@ -26,6 +26,12 @@ const apdName = document.getElementById('apd-name');
 const apdEditor = document.getElementById('apd-editor');
 const apdSlots = document.getElementById('apd-slots');
 const apdSlotsBtn = document.getElementById('apd-slots-btn');
+const apdMkNew = document.getElementById('apd-mk-new');
+const apdMkOld = document.getElementById('apd-mk-old');
+const apdMkExtra = document.getElementById('apd-mark-extra');
+const apdMkPhase = document.getElementById('apd-mk-phase');
+const apdMkDate = document.getElementById('apd-mk-date');
+const apdMkReason = document.getElementById('apd-mk-reason');
 const layoutEl = document.getElementById('layout');
 const sidebarToggle = document.getElementById('sidebar-toggle');
 const apGutter = document.getElementById('ap-gutter');
@@ -206,6 +212,7 @@ function attachOverlay(tab) {
 	const has = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
 	if (!has && !tab.editMode) return;
 	if (!set) return;
+	if (tab._snapshot === undefined) tab._snapshot = JSON.stringify(set.annotations); // Undo baseline 시드(첫 변이 전)
 	tab.overlay = DDOverlay.attach(tab.frame, set, {
 		editable: tab.editMode,
 		onChange: () => { markDirty(tab); renderAnnotPanel(); },
@@ -213,7 +220,72 @@ function attachOverlay(tab) {
 		onScreenChange: () => { renderAnnotPanel(); renderScreenNav(); }, // 화면 전환 시 패널·네비 재렌더(편집·문서 모두 현재 화면 주석으로)
 
 		onDeleteRequest: (id) => removeAnnotation(tab, id),
+		onCopy: () => copySelectedPin(),
+		onPaste: () => pastePin(),
+		onDuplicate: () => duplicateSelectedPin(),
+		onUndo: () => undo(),
+		onRedo: () => redo(),
 	});
+}
+
+// 핀 클립보드 — 탭 간에도 유지(모듈 전역). deep clone 저장.
+let pinClipboard = null;
+function copySelectedPin() {
+	const tab = activeTab();
+	if (!tab || !tab.overlay) return;
+	const clone = tab.overlay.getSelectedClone();
+	if (clone) { pinClipboard = clone; showToast('핀 복사됨 — Ctrl+V 로 붙여넣기', 'ok'); }
+}
+function pastePin() {
+	const tab = activeTab();
+	if (!tab || !tab.overlay || !pinClipboard) return;
+	if (!tab.editMode) return; // 편집 모드에서만
+	tab.overlay.addClone(pinClipboard);
+}
+function duplicateSelectedPin() {
+	const tab = activeTab();
+	if (!tab || !tab.overlay) return;
+	const clone = tab.overlay.getSelectedClone();
+	if (clone) tab.overlay.addClone(clone);
+}
+function nudgeSelectedPin(dx, dy) {
+	const tab = activeTab();
+	if (tab && tab.overlay) tab.overlay.nudgeSelected(dx, dy);
+}
+
+// ---- Undo/Redo — 주석 배열 스냅샷 스택(탭별). 텍스트 편집 Undo 는 네이티브에 위임 ----------
+//   모든 변이가 거치는 renderAnnotPanel·applyMark 에서 recordSnapshot 로 커밋 후 상태를 적립한다.
+//   diff 로 실제 변경만 push(선택·화면전환 등 비변이 재렌더는 no-op).
+const UNDO_MAX = 100;
+function recordSnapshot(tab) {
+	if (!tab || !tab.annotations) return;
+	const cur = JSON.stringify(tab.annotations.annotations);
+	if (tab._snapshot === undefined) { tab._snapshot = cur; return; } // 최초 baseline
+	if (cur === tab._snapshot) return;
+	(tab._undo = tab._undo || []).push(tab._snapshot);
+	if (tab._undo.length > UNDO_MAX) tab._undo.shift();
+	tab._snapshot = cur;
+	tab._redo = [];
+}
+function restoreSnapshot(tab, serialized) {
+	tab.annotations.annotations = JSON.parse(serialized);
+	tab._snapshot = serialized; // baseline 갱신 → 뒤따르는 renderAnnotPanel 이 재기록 안 함
+	if (tab.overlay) tab.overlay.refresh();
+	markDirty(tab);
+	renderAnnotPanel();
+	renderDetail();
+}
+function undo() {
+	const tab = activeTab();
+	if (!tab || !tab.annotations || !tab._undo || !tab._undo.length) return;
+	(tab._redo = tab._redo || []).push(JSON.stringify(tab.annotations.annotations));
+	restoreSnapshot(tab, tab._undo.pop());
+}
+function redo() {
+	const tab = activeTab();
+	if (!tab || !tab.annotations || !tab._redo || !tab._redo.length) return;
+	(tab._undo = tab._undo || []).push(JSON.stringify(tab.annotations.annotations));
+	restoreSnapshot(tab, tab._redo.pop());
 }
 
 // spec-html 목업 크롬 정리 — 목업 자체 주석(area-rail·el-pin·매핑)은 dd 핀과 겹치므로 clean 으로 끈다.
@@ -412,7 +484,8 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	tab.raw = doc.raw || ''; // 원본 HTML 전체 (무손상)
 	const io = window.DDHtmlIO.extract(tab.raw); // 재개봉 — dd 블록 분리(중복 누적 방지). 없으면 set=null
 	tab.pure = io.pure;
-	tab.annotations = io.set;
+	tab.annotations = io.set ? DDModel.migrate(io.set) : null; // v1 저장본 → v2 승격(마킹 스키마)
+	tab._snapshot = undefined; tab._undo = []; tab._redo = []; // Undo 스택 리셋(새 문서)
 	tab.isAnnotated = !!io.set; // 이 파일이 이미 dd 주석본인지 — 순수 목업이면 첫 저장 시 복사본 생성(원본 보존)
 	tab.exists = true;
 	tab.editMode = false; // 새 문서 = 뷰어 모드부터 (편집은 명시 토글)
@@ -628,17 +701,18 @@ function annotTypeIcon(a) { return a.type === 'box' ? '▭' : '📍'; }
 
 // diff 배지 — 신규(manual 직접)/수정(draft 편집됨). 기존(draft 미편집)은 배지 없음. 목록·문서 뷰 공용.
 function statusBadgeEl(a) {
-	const st = DDModel.annotStatus(a);
-	if (st !== 'new' && st !== 'modified') return null;
+	const badge = DDModel.annotBadge(a); // { status, label } — 마킹 우선(신규·2차 등), 없으면 origin 폴백
+	if (badge.status !== 'new' && badge.status !== 'modified') return null;
 	const b = document.createElement('span');
-	b.className = 'st-badge st-' + st;
-	b.textContent = st === 'new' ? '신규' : '수정';
+	b.className = 'st-badge st-' + badge.status + ((a.mark && a.mark.phase >= 2) ? ' st-phase' : '');
+	b.textContent = badge.label;
 	return b;
 }
 
 function renderAnnotPanel() {
 	if (!annotPanel) return;
 	const tab = activeTab();
+	recordSnapshot(tab); // 변이 커밋 적립(diff — 비변이 재렌더는 no-op). Undo/Redo baseline.
 	if (tab && tab.docMode && tab.docPath) { renderDocPanel(tab); return; } // 문서 뷰는 읽기 표로(편집 패널 우회)
 	annotPanel.classList.remove('doc-mode');
 	const set = tab && tab.annotations;
@@ -910,6 +984,7 @@ function renderDetail() {
 	apDetail.classList.remove('hidden');
 	apdLabel.textContent = ann.label;
 	apdName.textContent = ann.type === 'box' ? '범위 설명' : '핀 설명';
+	renderMark(ann);
 	apdSlotMode = !!(ann.slots && ann.slots.fields);
 	apdSlotsBtn.classList.toggle('is-on', apdSlotMode);
 	apdEditor.classList.toggle('hidden', apdSlotMode);
@@ -951,6 +1026,49 @@ function renderSlots(ann) {
 	}
 }
 function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+
+// 오늘 날짜 YYYY-MM-DD (신규 마킹 기본 addedAt).
+function today() {
+	const d = new Date();
+	const p = (n) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+// 마킹 UI 렌더 — 사용자 지정 mark(신규/기존 + 차수·날짜·사유) 반영. 포커스 중 입력은 안 덮어씀.
+function renderMark(ann) {
+	if (!apdMkNew || !apdMkOld) return;
+	const mark = ann.mark || null;
+	const kind = mark && mark.kind;
+	apdMkNew.classList.toggle('is-on', kind === '신규');
+	apdMkOld.classList.toggle('is-on', kind === '기존');
+	const showExtra = kind === '신규';
+	apdMkExtra.classList.toggle('hidden', !showExtra);
+	if (showExtra) {
+		if (document.activeElement !== apdMkPhase) apdMkPhase.value = String((mark && mark.phase) || 1);
+		if (document.activeElement !== apdMkDate) apdMkDate.value = (mark && mark.addedAt) || today();
+		if (document.activeElement !== apdMkReason) apdMkReason.value = (mark && mark.reason) || '';
+	}
+}
+// 마킹 변경 반영 — mark 병합 후 더티·행텍스트·오버레이 배지 refresh.
+function applyMark(patch) {
+	const { tab, ann } = selectedAnnotation();
+	if (!ann) return;
+	ann.mark = Object.assign({ kind: null, phase: null, addedAt: null, reason: '' }, ann.mark || {}, patch);
+	markDirty(tab);
+	if (tab.overlay) tab.overlay.refresh();
+	recordSnapshot(tab); // 마킹 변경 Undo 적립(renderAnnotPanel 안 거치는 경로라 직접)
+	updateRowText(ann);
+	renderMark(ann);
+}
+if (apdMkNew) apdMkNew.addEventListener('click', () => {
+	const { ann } = selectedAnnotation();
+	if (!ann) return;
+	const cur = ann.mark || {};
+	applyMark({ kind: '신규', phase: cur.phase || 1, addedAt: cur.addedAt || today(), reason: cur.reason || '' });
+});
+if (apdMkOld) apdMkOld.addEventListener('click', () => applyMark({ kind: '기존', phase: null, addedAt: null, reason: '' }));
+if (apdMkPhase) apdMkPhase.addEventListener('change', () => applyMark({ phase: Number(apdMkPhase.value) || 1 }));
+if (apdMkDate) apdMkDate.addEventListener('change', () => applyMark({ addedAt: apdMkDate.value || null }));
+if (apdMkReason) apdMkReason.addEventListener('input', () => applyMark({ reason: apdMkReason.value }));
 
 // 리스트 행의 요약 텍스트만 갱신(패널 통째 re-render 없이 — 편집 중 포커스 유지).
 function updateRowText(ann) {
@@ -1060,30 +1178,38 @@ window.addEventListener('mouseup', (e) => {
 	else if (e.button === 4) { e.preventDefault(); goForward(); }
 });
 
-// 단축키 — Ctrl+E 주석 편집, Ctrl+\ 분할, Alt+←/→ 이동 (활성 탭 기준). 줌은 메인의 before-input-event 가 처리.
+// 텍스트 입력(contenteditable/input/textarea/select) 중인가 — 핀 단축키를 네이티브에 양보하는 가드.
+function inTextField(t) {
+	return !!(t && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'));
+}
+// 단축키 — Figma/PPT 표준 우선. Ctrl+B=볼드(편집기 네이티브), Ctrl+D=복제, Ctrl+C/V=복사/붙여넣기, 화살표=미세이동.
+//   기존 토글 이사 — 사이드바 Ctrl+Shift+B, 문서 뷰 Ctrl+Shift+D. 줌은 메인의 before-input-event 가 처리.
 document.addEventListener('keydown', (e) => {
 	const ctrl = e.ctrlKey || e.metaKey;
-	if (ctrl && (e.key === 'b' || e.key === 'B')) {
+	// 창 단축키 — 텍스트 입력 여부와 무관
+	if (ctrl && e.shiftKey && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); toggleSidebar(); return; } // 사이드바(이사)
+	if (ctrl && e.shiftKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); toggleDocMode(); return; } // 문서 뷰(이사)
+	if (ctrl && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveTab(e.shiftKey); return; } // Ctrl+Shift+S = 다른 이름으로
+	if (ctrl && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); toggleEdit(); return; }
+	if (ctrl && e.key === '\\') { e.preventDefault(); splitActive(); return; }
+	if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); return; }
+	if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goForward(); return; }
+	// 볼드(Ctrl+B, Shift 없음)는 편집기 contenteditable 네이티브에 위임 — 여기서 가로채지 않는다.
+	// 핀 편집 단축키 — 텍스트 입력 중이면 네이티브(복사/붙여넣기/삭제) 우선.
+	if (inTextField(e.target)) return;
+	if (ctrl && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; } // 되돌리기/다시
+	if (ctrl && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+	const tab = activeTab();
+	const hasSel = !!(tab && tab.overlay && tab.overlay.getSelected());
+	if (ctrl && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicateSelectedPin(); return; } // 복제
+	if (ctrl && (e.key === 'c' || e.key === 'C')) { if (hasSel) { e.preventDefault(); copySelectedPin(); } return; } // 복사
+	if (ctrl && (e.key === 'v' || e.key === 'V')) { if (pinClipboard && tab && tab.editMode) { e.preventDefault(); pastePin(); } return; } // 붙여넣기
+	if (hasSel && tab.editMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
 		e.preventDefault();
-		toggleSidebar();
-	} else if (ctrl && (e.key === 's' || e.key === 'S')) {
-		e.preventDefault();
-		saveTab(e.shiftKey); // Ctrl+Shift+S = 다른 이름으로
-	} else if (ctrl && (e.key === 'e' || e.key === 'E')) {
-		e.preventDefault();
-		toggleEdit();
-	} else if (ctrl && (e.key === 'd' || e.key === 'D')) {
-		e.preventDefault();
-		toggleDocMode();
-	} else if (ctrl && e.key === '\\') {
-		e.preventDefault();
-		splitActive();
-	} else if (e.altKey && e.key === 'ArrowLeft') {
-		e.preventDefault();
-		goBack();
-	} else if (e.altKey && e.key === 'ArrowRight') {
-		e.preventDefault();
-		goForward();
+		const step = e.shiftKey ? 10 : 1; // Shift = 큰 폭
+		const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+		const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+		nudgeSelectedPin(dx, dy);
 	}
 });
 

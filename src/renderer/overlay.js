@@ -40,6 +40,17 @@ const DDOverlay = (() => {
 #${ROOT_ID} .dd-box.dd-st-modified { border-color: #e08600; }
 #${ROOT_ID} .dd-box.dd-st-new .dd-box-label { background: #18a558; }
 #${ROOT_ID} .dd-box.dd-st-modified .dd-box-label { background: #e08600; }
+/* 신규 2·3차 — 볼트 phase.css 황색 언어(#D97706). dd-st-new 뒤에 둬 우선. */
+#${ROOT_ID} .dd-pin.dd-ph { background: #D97706; }
+#${ROOT_ID} .dd-box.dd-ph { border-color: #D97706; }
+#${ROOT_ID} .dd-box.dd-ph .dd-box-label { background: #D97706; }
+#${ROOT_ID} .dd-phase-badge {
+	position: absolute; top: -8px; right: -8px;
+	min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+	display: flex; align-items: center; justify-content: center;
+	background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px;
+	font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none;
+}
 #${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
 #${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
@@ -167,14 +178,24 @@ body.clean #screen-nav { display: none !important; }
 				el.textContent = a.label;
 			}
 			el.dataset.ddId = a.id;
-			const st = DDModel.annotStatus(a); // diff(M6) — new(초록)/modified(주황)/unchanged(기본 색)
-			el.classList.add('dd-st-' + st);
-			if (st === 'unchanged' && a.style && a.style.color) {
+			const badge = DDModel.annotBadge(a); // { status, label, tooltip } — 사용자 마킹 우선, 없으면 origin 폴백
+			el.classList.add('dd-st-' + badge.status);
+			const ph = (a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0;
+			if (ph) { // 신규 2·3차 — 황색 + 차수 배지
+				el.classList.add('dd-ph');
+				const pb = doc.createElement('span');
+				pb.className = 'dd-phase-badge';
+				pb.textContent = ph + '차';
+				el.appendChild(pb);
+			} else if (badge.status === 'unchanged' && a.style && a.style.color) {
 				if (a.type === 'box') el.style.borderColor = a.style.color;
 				else el.style.background = a.style.color;
 			}
 			const plain = a.body && a.body.plain;
-			if (plain) el.title = plain; // 읽기 모드 — 네이티브 툴팁으로 설명 확인
+			const tip = [];
+			if (badge.tooltip) tip.push('[' + badge.label + ']  ' + badge.tooltip);
+			if (plain) tip.push(plain);
+			if (tip.length) el.title = tip.join('\n'); // 읽기 모드 — 네이티브 툴팁(마킹 + 설명)
 			el.style.display = 'none';
 			layer.appendChild(el);
 			nodes.set(a.id, el);
@@ -380,6 +401,50 @@ body.clean #screen-nav { display: none !important; }
 			notifyChange();
 		}
 
+		// 선택 주석 deep clone — 복사/복제용(원본 무영향). 없으면 null.
+		function getSelectedClone() {
+			const a = annotations().find((x) => x.id === selectedId);
+			return a ? JSON.parse(JSON.stringify(a)) : null;
+		}
+		// clone 을 새 id·소폭 오프셋으로 추가(붙여넣기·복제 공용). 겹침 방지로 살짝 밀어 놓는다.
+		function addClone(src) {
+			if (!src) return null;
+			const clone = JSON.parse(JSON.stringify(src));
+			clone.id = DDModel.genId();
+			if (clone.type !== 'box' && clone.anchor && clone.anchor.mode === 'element') {
+				const o = clone.anchor.offsetPct || { dx: 0.5, dy: 0 };
+				clone.anchor.offsetPct = { dx: o.dx + 0.06, dy: o.dy + 0.06 };
+			} else if (clone.coord) {
+				clone.coord = Object.assign({}, clone.coord, { x: clone.coord.x + 0.02, y: clone.coord.y + 0.02 });
+			} else if (clone.anchor && clone.anchor.rectPct) {
+				const rp = clone.anchor.rectPct;
+				clone.anchor.rectPct = Object.assign({}, rp, { x: rp.x + 0.02, y: rp.y + 0.02 });
+			}
+			DDNumbering.add(set, clone);
+			rebuildNodes();
+			layout();
+			select(clone.id);
+			notifyChange();
+			return clone.id;
+		}
+		// 선택 주석 미세 이동(화살표) — 화면 px 델타를 더한 지점에서 앵커 재판정(드래그와 동일 경로).
+		function nudgeSelected(dx, dy) {
+			const a = annotations().find((x) => x.id === selectedId);
+			if (!a) return;
+			const node = nodes.get(a.id);
+			if (!node || node.style.display === 'none') return;
+			const r = node.getBoundingClientRect();
+			if (a.type === 'box') {
+				const hit = boxAnchorFor({ left: r.left + dx, top: r.top + dy, width: r.width, height: r.height });
+				a.anchor = hit.anchor; a.coord = hit.coord;
+			} else {
+				const hit = pinAnchorAt(r.left + r.width / 2 + dx, r.top + r.height / 2 + dy);
+				a.anchor = hit.anchor; a.coord = hit.coord;
+			}
+			layout();
+			notifyChange();
+		}
+
 		// 제스처 상태기 — mousedown 시작, DRAG_MIN 넘으면 드래그(이동/러버밴드), 미만이면 클릭(선택/핀 생성).
 		let gesture = null;
 		function onMouseDown(e) {
@@ -461,6 +526,20 @@ body.clean #screen-nav { display: none !important; }
 			if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
 				e.preventDefault();
 				if (opts.onDeleteRequest) opts.onDeleteRequest(selectedId);
+				return;
+			}
+			const ctrl = e.ctrlKey || e.metaKey;
+			if (ctrl && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) { if (opts.onRedo) opts.onRedo(); } else if (opts.onUndo) opts.onUndo(); return; } // 되돌리기/다시
+			if (ctrl && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); if (opts.onRedo) opts.onRedo(); return; }
+			if (ctrl && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); if (opts.onDuplicate) opts.onDuplicate(); return; } // 복제
+			if (ctrl && (e.key === 'c' || e.key === 'C') && selectedId) { e.preventDefault(); if (opts.onCopy) opts.onCopy(); return; } // 복사
+			if (ctrl && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); if (opts.onPaste) opts.onPaste(); return; } // 붙여넣기
+			if (selectedId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+				e.preventDefault();
+				const step = e.shiftKey ? 10 : 1; // 미세 이동(Figma식) — Shift 는 큰 폭
+				const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+				const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+				nudgeSelected(dx, dy);
 			}
 		}
 		doc.addEventListener('mousedown', onMouseDown, true);
@@ -498,6 +577,9 @@ body.clean #screen-nav { display: none !important; }
 			stats: () => lastStats,
 			select,
 			getSelected: () => selectedId,
+			getSelectedClone,   // 복사용 deep clone
+			addClone,           // 붙여넣기·복제 — 새 id·오프셋 추가
+			nudgeSelected,      // 화살표 미세 이동
 			// 패널(셸) 쪽 구조 변경(삭제·재번호·라벨) 후 호출 — 노드 전체 재생성 + 재배치
 			refresh() {
 				if (selectedId && !annotations().some((a) => a.id === selectedId)) selectedId = null;

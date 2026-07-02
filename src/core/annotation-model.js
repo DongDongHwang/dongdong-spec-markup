@@ -10,11 +10,12 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	const DD_VERSION = 1;
+	const DD_VERSION = 2;               // v2 — 사용자 지정 마킹(mark) 필드 도입. v1 저장본은 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
 	const TYPES = ['pin', 'box'];
 	const ANCHOR_MODES = ['element', 'coord'];
 	const SOURCE_KINDS = ['spec-html', 'generic'];
+	const MARK_KINDS = ['신규', '기존'];  // 사용자가 핀마다 직접 지정. 신규는 차수(phase)로 2·3차 확장.
 
 	// 주석 id — 'an_' + base36 6자. rng 주입 가능(테스트 재현성).
 	function genId(rng) {
@@ -51,14 +52,44 @@
 			slots: p.slots || null,
 			origin: p.origin === 'draft' ? 'draft' : 'manual', // M6 diff — draft(초안 주입) | manual(직접 생성=신규)
 			edited: !!p.edited,                                 // draft 를 사람이 손대면 true → '수정'
+			mark: p.mark || null,   // 사용자 지정 마킹. null=미지정→origin 자동 폴백.
+			                        // { kind:'신규'|'기존', phase:1|2|3|null, addedAt:'YYYY-MM-DD'|null, reason:string }
 		};
 	}
 
-	// diff 상태 — manual(직접 찍음)=신규 / draft 편집됨=수정 / draft 그대로=기존. 목록·핀·저장본 배지에 공용.
+	// diff 상태 — 사용자 mark 가 있으면 그게 SSOT(신규→new / 기존→unchanged).
+	//   mark 미지정이면 origin 자동 폴백 — manual=신규 / draft 편집됨=수정 / draft 그대로=기존.
 	//   origin 없는 옛 저장본은 manual 취급(신규) — 하위호환(과거엔 diff 개념 없음).
 	function annotStatus(a) {
+		if (a && a.mark && a.mark.kind) return a.mark.kind === '신규' ? 'new' : 'unchanged';
 		if (!a || a.origin !== 'draft') return 'new';
 		return a.edited ? 'modified' : 'unchanged';
+	}
+
+	// 배지 표시용 — { status, label, tooltip }. 신규 2·3차는 차수 병기, 툴팁은 날짜·사유.
+	function annotBadge(a) {
+		const status = annotStatus(a);
+		const mark = a && a.mark;
+		let label;
+		if (status === 'new') {
+			const phase = mark && mark.phase ? mark.phase : 1;
+			label = phase >= 2 ? `신규·${phase}차` : '신규';
+		} else if (status === 'modified') {
+			label = '수정';
+		} else {
+			label = '기존';
+		}
+		const parts = [];
+		if (mark && mark.addedAt) parts.push(mark.addedAt);
+		if (mark && mark.reason) parts.push(mark.reason);
+		return { status, label, tooltip: parts.join(' · ') };
+	}
+
+	// 저장본 로드 시 스키마 승격 — v1(마킹 개념 없음) → v2. 데이터 손실 없음(annotStatus 가 origin 폴백).
+	function migrate(set) {
+		if (!set || typeof set !== 'object') return set;
+		if (set.ddVersion === 1) set.ddVersion = DD_VERSION;
+		return set;
 	}
 
 	function isRatio(n) { return typeof n === 'number' && isFinite(n) && n >= -0.5 && n <= 1.5; } // 요소 내 비율(경계 살짝 벗어남 허용)
@@ -88,6 +119,15 @@
 			if (!c || !isPosRatio(c.x) || !isPosRatio(c.y)) errs.push(`${at}.coord: coord 모드는 x/y 비율 필수`);
 			else if (a.type === 'box' && !(isRatio(c.w) && isRatio(c.h))) errs.push(`${at}.coord: box 는 w/h 비율 필수`);
 		}
+		if (a.mark != null) { // 있을 때만 형태 검증(미지정 null 은 통과)
+			if (typeof a.mark !== 'object') errs.push(`${at}.mark: 객체여야 함`);
+			else {
+				if (a.mark.kind != null && !MARK_KINDS.includes(a.mark.kind)) errs.push(`${at}.mark.kind: ${MARK_KINDS.join('|')} 중 하나`);
+				if (a.mark.phase != null && ![1, 2, 3].includes(a.mark.phase)) errs.push(`${at}.mark.phase: 1|2|3`);
+				if (a.mark.addedAt != null && typeof a.mark.addedAt !== 'string') errs.push(`${at}.mark.addedAt: 문자열`);
+				if (a.mark.reason != null && typeof a.mark.reason !== 'string') errs.push(`${at}.mark.reason: 문자열`);
+			}
+		}
 		return errs;
 	}
 
@@ -95,7 +135,7 @@
 	function validateSet(set) {
 		const errs = [];
 		if (!set || typeof set !== 'object') return { ok: false, errors: ['세트가 객체가 아님'] };
-		if (set.ddVersion !== DD_VERSION) errs.push(`ddVersion: ${DD_VERSION} 이어야 함 (현재 ${set.ddVersion})`);
+		if (!(set.ddVersion >= 1 && set.ddVersion <= DD_VERSION)) errs.push(`ddVersion: 1~${DD_VERSION} 이어야 함 (현재 ${set.ddVersion})`); // v1 저장본 수용 → migrate 로 승격
 		if (!Array.isArray(set.annotations)) errs.push('annotations: 배열 필수');
 		else {
 			const seen = new Set();
@@ -110,5 +150,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus, annotBadge, migrate };
 });

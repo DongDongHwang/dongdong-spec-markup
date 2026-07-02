@@ -36,6 +36,10 @@
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
 #dd-overlay-root .dd-box.dd-st-modified { border-color: #e08600; }
 #dd-overlay-root .dd-box.dd-st-new .dd-box-label, #dd-overlay-root .dd-box.dd-st-modified .dd-box-label { background: inherit; }
+#dd-overlay-root .dd-pin.dd-ph { background: #D97706; }
+#dd-overlay-root .dd-box.dd-ph { border-color: #D97706; }
+#dd-overlay-root .dd-box.dd-ph .dd-box-label { background: #D97706; }
+#dd-overlay-root .dd-phase-badge { position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px; font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; }
 #dd-panel .dd-p-badge { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; margin-right: 4px; align-self: flex-start; }
 #dd-panel .dd-p-badge.dd-b-new { background: rgba(24,165,88,.15); color: #18a558; }
 #dd-panel .dd-p-badge.dd-b-modified { background: rgba(224,134,0,.2); color: #c26f00; }
@@ -75,8 +79,11 @@ body.dd-docview #description { display: none !important; }
 		var anns = set.annotations;
 		// spec-html 목업이면 자체 주석(area-rail·el-pin·매핑) 끄기 — dd 핀과 겹침 방지(dd 앱 clean 과 동일). 목업 좌하단 토글로 되돌릴 수 있다.
 		try { if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) doc.body.classList.add('clean'); } catch (e) {}
-		// diff 상태(M6) — manual/옛 저장본=신규 / draft 편집됨=수정 / draft 그대로=기존. dd 앱 annotStatus 판박이.
-		function annStatus(a) { if (!a || a.origin !== 'draft') return 'new'; return a.edited ? 'modified' : 'unchanged'; }
+		// diff 상태 — 사용자 mark 우선(신규/기존), 없으면 origin 폴백. dd 앱 annotStatus 판박이.
+		function annStatus(a) { if (a && a.mark && a.mark.kind) return a.mark.kind === '신규' ? 'new' : 'unchanged'; if (!a || a.origin !== 'draft') return 'new'; return a.edited ? 'modified' : 'unchanged'; }
+		function annPhase(a) { return (a && a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0; }
+		function annBadgeLabel(a) { var st = annStatus(a); if (st === 'new') { var ph = annPhase(a); return ph ? '신규·' + ph + '차' : '신규'; } return st === 'modified' ? '수정' : '기존'; }
+		function annTip(a) { var p = []; if (a.mark && a.mark.addedAt) p.push(a.mark.addedAt); if (a.mark && a.mark.reason) p.push(a.mark.reason); return p.join(' · '); }
 
 		// ---- 앵커 math (anchor.js 인라인) ----
 		function pinPoint(rect, off) {
@@ -135,7 +142,10 @@ body.dd-docview #description { display: none !important; }
 				}
 				el.setAttribute('data-dd-id', a.id);
 				var pst = annStatus(a); el.className += ' dd-st-' + pst;
-				if (pst === 'unchanged' && a.style && a.style.color) { if (a.type === 'box') el.style.borderColor = a.style.color; else el.style.background = a.style.color; }
+				var pph = annPhase(a);
+				if (pph) { el.className += ' dd-ph'; var pbg = doc.createElement('span'); pbg.className = 'dd-phase-badge'; pbg.textContent = pph + '차'; el.appendChild(pbg); }
+				else if (pst === 'unchanged' && a.style && a.style.color) { if (a.type === 'box') el.style.borderColor = a.style.color; else el.style.background = a.style.color; }
+				var ptip = annTip(a); if (ptip) el.title = '[' + annBadgeLabel(a) + '] ' + ptip;
 				el.style.display = 'none';
 				el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
 				root.appendChild(el);
@@ -180,7 +190,7 @@ body.dd-docview #description { display: none !important; }
 			for (var j = 0; j < sa.length; j++) {
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
-					var lst = annStatus(a), lbadge = (lst === 'new' || lst === 'modified') ? '<span class="dd-p-badge dd-b-' + lst + '">' + (lst === 'new' ? '신규' : '수정') + '</span>' : '';
+					var lst = annStatus(a), lbadge = (lst === 'new' || lst === 'modified') ? '<span class="dd-p-badge dd-b-' + lst + '">' + annBadgeLabel(a) + '</span>' : '';
 					li.innerHTML = '<span class="dd-p-num">' + a.label + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + '</div>';
 					li.addEventListener('click', function () { selectAnn(a.id); });
 					list.appendChild(li); rows[a.id] = li;
