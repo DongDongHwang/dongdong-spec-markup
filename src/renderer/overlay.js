@@ -85,6 +85,11 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 		try { return !!resolveAppData(frame.contentWindow); } catch (_) { return false; }
 	}
 
+	// APP_DATA 원본 반환 — 셸의 초안 주입(M4)이 areas/elements/desc 를 읽는다. 없으면 null(generic 목업).
+	function readAppData(frame) {
+		try { return resolveAppData(frame.contentWindow); } catch (_) { return null; }
+	}
+
 	function attach(frame, set, opts) {
 		opts = opts || {};
 		const doc = frame.contentDocument;
@@ -494,5 +499,5 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 		};
 	}
 
-	return { attach, detectSpecHtml };
+	return { attach, detectSpecHtml, readAppData };
 })();

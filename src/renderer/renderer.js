@@ -17,6 +17,23 @@ const annotPanel = document.getElementById('annot-panel');
 const annotList = document.getElementById('annot-list');
 const apCount = document.getElementById('ap-count');
 const apPullback = document.getElementById('ap-pullback');
+const apImport = document.getElementById('ap-import');
+const apDetail = document.getElementById('ap-detail');
+const apdLabel = document.getElementById('apd-label');
+const apdName = document.getElementById('apd-name');
+const apdEditor = document.getElementById('apd-editor');
+const apdSlots = document.getElementById('apd-slots');
+const apdSlotsBtn = document.getElementById('apd-slots-btn');
+
+// 5종 설명 슬롯 — spec-html APP_DATA 의 desc 키(functional/interaction/data/business/technical)와 1:1.
+// generic 목업에서도 같은 슬롯을 수동으로 채울 수 있다(주입만 spec-html 전용, 슬롯·편집은 목업 무관).
+const SLOT_5DIM = [
+	{ key: 'functional', label: '기능' },
+	{ key: 'interaction', label: '동작' },
+	{ key: 'data', label: '데이터' },
+	{ key: 'business', label: '비즈니스' },
+	{ key: 'technical', label: '기술' },
+];
 
 // 문서 없을 때 탭에 표시하는 웰컴.
 const WELCOME_HTML =
@@ -464,7 +481,12 @@ function renderAnnotPanel() {
 	const anns = set && Array.isArray(set.annotations) ? DDNumbering.sortedBySeq(set) : [];
 	const show = !!(tab && tab.docPath && (tab.editMode || anns.length > 0));
 	annotPanel.classList.toggle('hidden', !show);
-	if (!show) return;
+	if (!show) { if (apDetail) apDetail.classList.add('hidden'); return; }
+	// 초안 불러오기 — 편집 모드 + spec-html 목업(APP_DATA)일 때만. generic 목업엔 숨김(불변 원칙).
+	if (apImport) {
+		const canImport = !!(tab.editMode && DDOverlay.readAppData(tab.frame));
+		apImport.classList.toggle('hidden', !canImport);
+	}
 	apCount.textContent = String(anns.length);
 	annotList.innerHTML = '';
 	for (const a of anns) {
@@ -556,6 +578,7 @@ function renderAnnotPanel() {
 		annotList.appendChild(li);
 	}
 	if (tab.overlay) highlightAnnotRow(tab.overlay.getSelected());
+	else renderDetail();
 }
 
 // 패널 쪽 구조 변경(라벨·재정렬·자동복귀) 공통 후처리 — 오버레이 재생성 + 패널 재렌더 + 더티
@@ -565,7 +588,7 @@ function afterAnnotMutate(tab) {
 	renderAnnotPanel();
 }
 
-// 오버레이에서 선택 → 패널 행 하이라이트 + 스크롤
+// 오버레이에서 선택 → 패널 행 하이라이트 + 스크롤 + 설명 편집기 렌더
 function highlightAnnotRow(id) {
 	if (!annotList) return;
 	annotList.querySelectorAll('.annot-row').forEach((el) => {
@@ -573,7 +596,168 @@ function highlightAnnotRow(id) {
 		el.classList.toggle('is-active', on);
 		if (on) el.scrollIntoView({ block: 'nearest' });
 	});
+	renderDetail();
 }
+
+// ---- 설명 편집기 (M4) — 선택된 핀의 자유 리치텍스트 + 5종 슬롯 -----------------
+// 자유 리치텍스트가 SSOT(body.html/plain). 슬롯을 채우면 body 에 렌더 스냅샷을 합성한다.
+function selectedAnnotation() {
+	const tab = activeTab();
+	if (!tab || !tab.annotations || !tab.overlay) return { tab: null, ann: null };
+	const id = tab.overlay.getSelected();
+	const ann = id ? tab.annotations.annotations.find((a) => a.id === id) : null;
+	return { tab, ann };
+}
+
+// 슬롯 필드 → body.html/plain 합성 스냅샷 (빈 칸은 건너뜀).
+function composeSlots(fields) {
+	const rows = SLOT_5DIM.filter((s) => (fields[s.key] || '').trim())
+		.map((s) => `<li><b>${s.label}.</b> ${escapeHtml(fields[s.key].trim())}</li>`);
+	const html = rows.length ? `<ul class="dd-slot-body">${rows.join('')}</ul>` : '';
+	const plain = SLOT_5DIM.filter((s) => (fields[s.key] || '').trim())
+		.map((s) => `${s.label}. ${fields[s.key].trim()}`).join(' / ');
+	return { html, plain };
+}
+function escapeHtml(s) {
+	return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+// 편집기/슬롯을 선택 주석 상태로 렌더. 선택 없으면 detail 숨김.
+let apdSlotMode = false; // 슬롯 뷰 on/off (핀마다 slots 유무로 초기화)
+function renderDetail() {
+	if (!apDetail) return;
+	const { ann } = selectedAnnotation();
+	if (!ann) { apDetail.classList.add('hidden'); return; }
+	apDetail.classList.remove('hidden');
+	apdLabel.textContent = ann.label;
+	apdName.textContent = ann.type === 'box' ? '범위 설명' : '핀 설명';
+	apdSlotMode = !!(ann.slots && ann.slots.fields);
+	apdSlotsBtn.classList.toggle('is-on', apdSlotMode);
+	apdEditor.classList.toggle('hidden', apdSlotMode);
+	apdSlots.classList.toggle('hidden', !apdSlotMode);
+	if (apdSlotMode) renderSlots(ann);
+	else if (document.activeElement !== apdEditor) apdEditor.innerHTML = (ann.body && ann.body.html) || '';
+}
+
+// 5종 슬롯 입력 렌더 — 각 칸 편집 시 body 합성 + 더티.
+function renderSlots(ann) {
+	const fields = (ann.slots && ann.slots.fields) || {};
+	apdSlots.innerHTML = '';
+	for (const s of SLOT_5DIM) {
+		const wrap = document.createElement('label');
+		wrap.className = 'apd-slot';
+		const cap = document.createElement('span');
+		cap.className = 'apd-slot-cap';
+		cap.textContent = s.label;
+		const ta = document.createElement('textarea');
+		ta.className = 'apd-slot-input';
+		ta.rows = 1;
+		ta.value = fields[s.key] || '';
+		ta.placeholder = '…';
+		ta.addEventListener('input', () => {
+			autoGrow(ta);
+			const { tab, ann: cur } = selectedAnnotation();
+			if (!cur) return;
+			cur.slots = cur.slots || { template: 'app-5dim', fields: {} };
+			cur.slots.fields[s.key] = ta.value;
+			const c = composeSlots(cur.slots.fields);
+			cur.body = { format: 'html', html: c.html, plain: c.plain };
+			markDirty(tab);
+			updateRowText(cur);
+		});
+		wrap.append(cap, ta);
+		apdSlots.appendChild(wrap);
+		autoGrow(ta);
+	}
+}
+function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+
+// 리스트 행의 요약 텍스트만 갱신(패널 통째 re-render 없이 — 편집 중 포커스 유지).
+function updateRowText(ann) {
+	if (!annotList) return;
+	const row = annotList.querySelector(`.annot-row[data-annot-id="${ann.id}"] .annot-text`);
+	if (row) row.textContent = (ann.body && ann.body.plain) || (ann.anchor && ann.anchor.mode === 'element' ? ann.anchor.elementId : '(설명 없음)');
+}
+
+// 자유 편집기 입력 → body 저장(디바운스 없이 즉시, 저장은 M5). 슬롯 모드일 땐 편집기 비활성.
+if (apdEditor) {
+	apdEditor.addEventListener('input', () => {
+		const { tab, ann } = selectedAnnotation();
+		if (!ann || apdSlotMode) return;
+		ann.body = { format: 'html', html: apdEditor.innerHTML, plain: apdEditor.textContent || '' };
+		ann.slots = null; // 자유 텍스트로 쓰면 슬롯 스냅샷 폐기(SSOT=자유 텍스트)
+		markDirty(tab);
+		updateRowText(ann);
+	});
+}
+// 서식 툴바 — execCommand 최소셋(deprecated 수용, v1).
+if (apDetail) {
+	apDetail.querySelectorAll('.apd-toolbar button').forEach((btn) => {
+		btn.addEventListener('mousedown', (e) => {
+			e.preventDefault(); // 편집기 포커스·선택 유지
+			apdEditor.focus();
+			if (btn.dataset.cmd) document.execCommand(btn.dataset.cmd, false, null);
+			else if (btn.dataset.color !== undefined) {
+				if (btn.dataset.color) document.execCommand('foreColor', false, btn.dataset.color);
+				else document.execCommand('removeFormat', false, null);
+			}
+			apdEditor.dispatchEvent(new Event('input'));
+		});
+	});
+}
+// 슬롯 뷰 토글 — 자유 텍스트 ↔ 5종 슬롯. 슬롯 최초 진입 시 빈 슬롯 세트 생성.
+if (apdSlotsBtn) {
+	apdSlotsBtn.addEventListener('click', () => {
+		const { tab, ann } = selectedAnnotation();
+		if (!ann) return;
+		if (apdSlotMode) { // 슬롯 → 자유: 슬롯 스냅샷을 자유 텍스트로 승격
+			ann.slots = null;
+			apdSlotMode = false;
+		} else {
+			ann.slots = ann.slots || { template: 'app-5dim', fields: {} };
+			apdSlotMode = true;
+		}
+		markDirty(tab);
+		renderDetail();
+	});
+}
+
+// ---- 초안 불러오기 (M4c) — spec-html APP_DATA → 핀 초안 (generic 목업엔 버튼 숨김) -----
+function importDrafts() {
+	const tab = activeTab();
+	if (!tab || !tab.editMode || !tab.annotations) return;
+	const app = DDOverlay.readAppData(tab.frame);
+	if (!app || !app.screens) { window.alert('이 목업엔 불러올 요소 설명(APP_DATA)이 없습니다.\n임의 HTML 목업은 직접 핀을 찍어 설명하세요.'); return; }
+	const screenId = app.currentScreen || Object.keys(app.screens)[0];
+	const screen = app.screens[screenId];
+	const areas = (screen && screen.areas) || [];
+	const els = [];
+	for (const area of areas) for (const el of (area.elements || [])) if (!el.noNum) els.push({ el, area });
+	if (els.length === 0) { window.alert(`현재 화면(${screenId})에 번호 매길 요소가 없습니다.`); return; }
+	const existing = new Set(tab.annotations.annotations
+		.filter((a) => a.anchor && a.anchor.mode === 'element')
+		.map((a) => a.anchor.screenId + '|' + a.anchor.elementId));
+	let added = 0;
+	for (const { el } of els) {
+		if (existing.has(screenId + '|' + el.id)) continue; // 이미 찍힌 요소는 건너뜀(중복 방지)
+		const fields = {};
+		if (el.desc) for (const s of SLOT_5DIM) if (el.desc[s.key]) fields[s.key] = el.desc[s.key];
+		const c = composeSlots(fields);
+		const a = DDModel.createAnnotation({
+			type: 'pin',
+			anchor: { mode: 'element', elementId: el.id, screenId },
+			slots: Object.keys(fields).length ? { template: 'app-5dim', fields } : null,
+			body: { format: 'html', html: c.html, plain: c.plain || el.name },
+		});
+		DDNumbering.add(tab.annotations, a);
+		added++;
+	}
+	if (tab.overlay) tab.overlay.refresh(); else attachOverlay(tab);
+	markDirty(tab);
+	renderAnnotPanel();
+	window.alert(added > 0 ? `초안 ${added}개 불러왔습니다. 위치·문구를 다듬어 확정하세요.` : '새로 추가할 요소가 없습니다(이미 다 찍혀 있음).');
+}
+if (apImport) apImport.addEventListener('click', importDrafts);
 
 // 브라우저식 뒤로/앞으로 — 활성 탭의 방문 기록.
 function goBack() {

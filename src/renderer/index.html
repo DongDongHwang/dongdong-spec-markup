@@ -39,9 +39,28 @@
 			<aside id="annot-panel" class="annot-panel hidden">
 				<div class="ap-head">
 					<span class="ap-title">주석 <b id="ap-count">0</b></span>
-					<label class="ap-pull" title="끄면 삭제해도 뒤 번호가 안 당겨집니다(자동 번호는 현재 값으로 동결)"><input type="checkbox" id="ap-pullback" checked />삭제 시 당김</label>
+					<div class="ap-head-actions">
+						<button id="ap-import" type="button" class="ap-import hidden" title="spec-html 목업의 요소 설명(APP_DATA)을 핀 초안으로 불러옵니다">✨ 초안 불러오기</button>
+						<label class="ap-pull" title="끄면 삭제해도 뒤 번호가 안 당겨집니다(자동 번호는 현재 값으로 동결)"><input type="checkbox" id="ap-pullback" checked />삭제 시 당김</label>
+					</div>
 				</div>
 				<ul id="annot-list" class="annot-list"></ul>
+				<section id="ap-detail" class="ap-detail hidden">
+					<div class="apd-head">
+						<span class="apd-label" id="apd-label">1</span>
+						<span class="apd-name" id="apd-name">설명</span>
+						<button id="apd-slots-btn" type="button" class="apd-slots-btn" title="5종 설명 슬롯(기능/동작/데이터/비즈니스/기술)으로 채우기">▤ 슬롯</button>
+					</div>
+					<div class="apd-toolbar">
+						<button type="button" data-cmd="bold" title="굵게"><b>B</b></button>
+						<button type="button" data-cmd="italic" title="기울임"><i>I</i></button>
+						<button type="button" data-cmd="insertUnorderedList" title="글머리 목록">•</button>
+						<button type="button" data-color="#7460D9" title="보라 강조" class="apd-color">A</button>
+						<button type="button" data-color="" title="색 제거" class="apd-color-clear">A</button>
+					</div>
+					<div id="apd-editor" class="apd-editor" contenteditable="true" data-placeholder="핀 설명을 입력하세요…"></div>
+					<div id="apd-slots" class="apd-slots hidden"></div>
+				</section>
 				<div class="ap-hint">편집 모드 — 목업 클릭 = 핀 · 드래그 = 박스 · 핀 드래그 = 이동<br />행 더블클릭 = 번호 수정 · 행 드래그 = 재정렬 · Delete = 삭제<br />화면 이동(goScreen)은 편집을 끄고 하세요.</div>
 			</aside>
 		</div>
