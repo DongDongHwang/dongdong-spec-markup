@@ -412,6 +412,8 @@ kbd {
 }
 #topbar .actions button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 #topbar .actions button:disabled { color: var(--muted); border-color: var(--border); cursor: default; }
+#topbar .actions #save-btn:not(:disabled) { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+#topbar .actions #save-btn:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 85%, #000); }
 
 /* ---- 주석 패널 (M3 번호 자유관리) ---- */
 #topbar .actions #edit-btn.is-on { color: #fff; background: #7460D9; border-color: #7460D9; }

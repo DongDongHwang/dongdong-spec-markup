@@ -12,6 +12,7 @@ const docpath = document.getElementById('docpath');
 const splitBtn = document.getElementById('split-btn');
 const newWinBtn = document.getElementById('newwin-btn');
 const editBtn = document.getElementById('edit-btn');
+const saveBtn = document.getElementById('save-btn');
 const panes = document.getElementById('panes');
 const annotPanel = document.getElementById('annot-panel');
 const annotList = document.getElementById('annot-list');
@@ -162,12 +163,41 @@ function removeAnnotation(tab, id) {
 	renderAnnotPanel();
 }
 
-// 미저장 표시 — 탭 제목 ● (저장 왕복은 M5. 그 전까지 편집은 메모리에만 산다)
+// 미저장 표시 — 탭 제목 ● + 저장 버튼 활성화(syncTopbar).
 function markDirty(tab) {
 	if (tab.dirty) return;
 	tab.dirty = true;
 	renderTabstrip(groupOf(tab));
+	syncTopbar();
 }
+
+// ---- 주석 저장 (M5) — 원본 HTML 에 주석 블록을 무손상 심어 자기완결 파일로 -------------------
+// asNew=true 면 다른 이름 저장. 저장물 = 주석 있으면 embed, 없으면 순수 원본(dd 블록 미삽입).
+async function saveTab(asNew) {
+	const tab = activeTab();
+	if (!tab || !tab.docPath) return;
+	const set = tab.annotations;
+	const hasAnn = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
+	if (set) set.savedAt = new Date().toISOString();
+	// tab.raw(원본, dd 블록 포함 가능) 기준으로 embed — embed 가 기존 블록 strip 후 1세트만 남긴다(멱등·무손상).
+	const html = hasAnn ? window.DDHtmlIO.embed(tab.raw, set) : window.DDHtmlIO.strip(tab.raw);
+	let res;
+	if (asNew) res = await window.ddsv.saveAnnotatedAs(tab.docPath, html);
+	else res = await window.ddsv.saveAnnotated(tab.docPath, html);
+	if (!res || res.canceled) return;
+	if (!res.ok) { window.alert('저장 실패\n' + (res.error || '')); return; }
+	// 저장 성공 — 메모리 상태를 저장본에 맞춘다(재저장 멱등·더티 해제). 경로 갱신(다른 이름 저장).
+	tab.docPath = res.filePath || tab.docPath;
+	tab.raw = html;
+	const io = window.DDHtmlIO.extract(html);
+	tab.pure = io.pure;
+	tab.dirty = false;
+	renderTabstrip(groupOf(tab));
+	syncTopbar();
+	highlightActive(tab.docPath);
+}
+if (saveBtn) saveBtn.addEventListener('click', (e) => saveTab(!!e.shiftKey));
+window.ddsv.onMenuSave((as) => saveTab(!!as));
 
 // 편집 모드 토글 — 주석 세트가 없으면 여기서 처음 만든다(spec-html 판별은 APP_DATA 유무).
 function toggleEdit() {
@@ -461,6 +491,11 @@ function syncTopbar() {
 	if (editBtn) {
 		editBtn.disabled = !hasDoc;
 		editBtn.classList.toggle('is-on', !!(tab && tab.editMode));
+	}
+	if (saveBtn) {
+		// 저장 가능 = 문서 있고 (미저장 변경 또는 주석 보유). 주석 없는 원본만 열린 상태면 저장 의미 없음.
+		const hasAnn = !!(tab && tab.annotations && tab.annotations.annotations.length > 0);
+		saveBtn.disabled = !(hasDoc && (tab.dirty || hasAnn));
 	}
 	renderAnnotPanel();
 }
@@ -781,7 +816,10 @@ window.addEventListener('mouseup', (e) => {
 // 단축키 — Ctrl+E 주석 편집, Ctrl+\ 분할, Alt+←/→ 이동 (활성 탭 기준). 줌은 메인의 before-input-event 가 처리.
 document.addEventListener('keydown', (e) => {
 	const ctrl = e.ctrlKey || e.metaKey;
-	if (ctrl && (e.key === 'e' || e.key === 'E')) {
+	if (ctrl && (e.key === 's' || e.key === 'S')) {
+		e.preventDefault();
+		saveTab(e.shiftKey); // Ctrl+Shift+S = 다른 이름으로
+	} else if (ctrl && (e.key === 'e' || e.key === 'E')) {
 		e.preventDefault();
 		toggleEdit();
 	} else if (ctrl && e.key === '\\') {

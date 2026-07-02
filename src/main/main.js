@@ -346,6 +346,41 @@ ipcMain.handle('touch-recent', (_e, p) => {
 	return { ok: true };
 });
 
+// ---- 주석 HTML 저장 (M5) — 렌더러가 조립한 자기완결 HTML 을 파일로. 쓰고 다시 읽어 자가검증. ----
+// html 문자열은 렌더러(DDHtmlIO.embed)가 이미 만든 최종본 — main 은 바이트를 그대로 쓴다(무손상 책임은 렌더러).
+function writeVerified(filePath, html) {
+	fs.writeFileSync(filePath, html, 'utf8');
+	const back = fs.readFileSync(filePath, 'utf8'); // 마운트 캐시·인코딩 사고 방지 — 재읽기로 확정
+	if (back !== html) return { ok: false, filePath, error: '저장 후 재읽기 불일치(디스크 확인 필요)' };
+	pushRecent(filePath);
+	return { ok: true, filePath };
+}
+
+// 현재 경로에 덮어쓰기.
+ipcMain.handle('save-annotated-html', (_e, filePath, html) => {
+	if (!filePath || typeof filePath !== 'string' || typeof html !== 'string') return { ok: false, error: '인자 누락' };
+	try { return writeVerified(filePath, html); } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// 다른 이름으로 저장 — 기본 파일명은 원본 옆 `<이름>_annotated.html`. 취소 시 { canceled:true }.
+ipcMain.handle('save-annotated-html-as', async (e, srcPath, html) => {
+	if (typeof html !== 'string') return { ok: false, error: 'html 누락' };
+	const win = BrowserWindow.fromWebContents(e.sender);
+	let defaultPath;
+	if (srcPath && typeof srcPath === 'string') {
+		const dir = path.dirname(srcPath);
+		const base = path.basename(srcPath).replace(/(_annotated)?\.html?$/i, '');
+		defaultPath = path.join(dir, base + '_annotated.html');
+	}
+	const res = await dialog.showSaveDialog(win || undefined, {
+		title: '주석 HTML 다른 이름으로 저장',
+		defaultPath,
+		filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+	});
+	if (res.canceled || !res.filePath) return { canceled: true };
+	try { return writeVerified(res.filePath, html); } catch (er) { return { ok: false, error: er.message }; }
+});
+
 // ---- 드래그앤드롭 분류 -------------------------------------------------------
 // 드롭 폴더 스캔이 앱을 얼리지 않도록 위험/초대형 경로를 가른다.
 //   - 드라이브 루트(C:\) : 무조건 위험
