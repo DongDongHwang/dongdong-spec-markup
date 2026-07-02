@@ -677,5 +677,40 @@ body.clean #screen-nav { display: none !important; }
 		};
 	}
 
-	return { attach, detectSpecHtml, readAppData, gotoScreen };
+	// ---- M5.6 문서 뷰 — 전 화면 클론 스택 인프라 (attach 클로저 밖 — frame 단위 순수 접근) ----------
+
+	// 화면 목록 — 신버전 APP_DATA.screens 가 SSOT(id·name·순서). 없으면 빈 배열 → 문서 뷰는 현재 화면 1장 폴백(M5.5).
+	//   구버전(.screen-view)·generic 자동 순회는 목업별 전환함수·컨테이너가 제각각이라 v1 범위 밖(폴백으로 안전).
+	function listScreens(frame) {
+		try {
+			const app = resolveAppData(frame.contentWindow);
+			if (app && app.screens && typeof app.screens === 'object') {
+				return Object.keys(app.screens).map((k) => {
+					const s = app.screens[k] || {};
+					return { id: s.id || k, name: s.name || s.id || k, type: s.type || 'page' };
+				}).filter((s) => s.id);
+			}
+		} catch (_) { /* 접근 불가 — 폴백 */ }
+		return [];
+	}
+
+	// 한 화면으로 전환 후 그 순간의 스테이지 DOM 클론 — 신버전은 innerHTML 재작성이 rAF 뒤 끝나므로 두 틱 대기.
+	//   반환 = { id, clone } (clone = detached 노드. 목업 스타일은 iframe 내부 <style> 이 살아있어 iframe 안에 append 할 때만 적용).
+	//   실패 시 null. Promise — 순회 호출자는 순차 await.
+	function snapshotScreen(frame, id) {
+		return new Promise((resolve) => {
+			const doc = frame.contentDocument, win = frame.contentWindow;
+			if (!doc || !win) return resolve(null);
+			gotoScreen(frame, id);
+			win.requestAnimationFrame(() => win.requestAnimationFrame(() => {
+				try {
+					const stage = doc.querySelector('#wireframe') || doc.querySelector('.frame-stage')
+						|| doc.querySelector('.mobile-frame') || doc.querySelector('.web-frame') || doc.body;
+					resolve({ id: id, clone: stage ? stage.cloneNode(true) : null });
+				} catch (_) { resolve(null); }
+			}));
+		});
+	}
+
+	return { attach, detectSpecHtml, readAppData, gotoScreen, listScreens, snapshotScreen };
 })();

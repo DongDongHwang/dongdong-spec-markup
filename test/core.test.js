@@ -36,10 +36,28 @@ test('model: genId 형식 + rng 주입 재현성', () => {
 
 test('model: createSet 기본값 + source.kind 방어', () => {
 	const s = DDModel.createSet('spec-html');
-	assert.strictEqual(s.ddVersion, 3);
+	assert.strictEqual(s.ddVersion, 4);
 	assert.strictEqual(s.source.kind, 'spec-html');
+	assert.strictEqual(s.docMeta, null); // 정책부 미추출 상태 — 저장 시 목업에서 채움
 	assert.deepStrictEqual(s.annotations, []);
 	assert.strictEqual(DDModel.createSet('이상한값').source.kind, 'generic');
+});
+
+test('model: normalizeDocMeta — 정책부 스냅샷 정규화 + 빈 입력 null', () => {
+	assert.strictEqual(DDModel.normalizeDocMeta(null), null);
+	assert.strictEqual(DDModel.normalizeDocMeta({}), null); // 내용 없으면 null → 정책부 섹션 생략
+	const m = DDModel.normalizeDocMeta({
+		title: '회원가입 분기', version: 'v1.0',
+		history: [{ no: 1, date: '2026-07-02', ver: 'v1.0', content: '최초', author: '동동이', extra: '버림' }],
+		overview: { 기능정의: '의도 분리', 추진배경: '자동분기 제거', 작업범위: '로그인 분리' },
+		flows: [{ id: 'LGN-001', name: '계정 선택' }],
+	});
+	assert.strictEqual(m.title, '회원가입 분기');
+	assert.strictEqual(m.history.length, 1);
+	assert.strictEqual(m.history[0].author, '동동이');
+	assert.strictEqual(m.history[0].extra, undefined); // 스키마 밖 키는 버림
+	assert.strictEqual(m.overview.기능정의, '의도 분리');
+	assert.strictEqual(m.flows[0].id, 'LGN-001');
 });
 
 test('model: 정상 세트 검증 통과 (element 핀 + coord 박스)', () => {
@@ -112,13 +130,16 @@ test('model: mark 형태 검증 — 잘못된 kind/phase 적발, 미지정(null)
 	assert.ok(v.errors.some((e) => e.includes('mark.phase')));
 });
 
-test('model: migrate v1·v2 → v3 (옛 저장본 무손실 승격)', () => {
+test('model: migrate v1·v2·v3 → v4 (옛 저장본 무손실 승격 + docMeta 채움)', () => {
 	const v1 = { ddVersion: 1, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
 	const out1 = DDModel.migrate(v1);
-	assert.strictEqual(out1.ddVersion, 3);
-	assert.strictEqual(DDModel.validateSet(out1).ok, true); // 승격 후 v3 스키마 통과
+	assert.strictEqual(out1.ddVersion, 4);
+	assert.strictEqual(out1.docMeta, null); // docMeta 없던 옛 세트 → null 로 채움
+	assert.strictEqual(DDModel.validateSet(out1).ok, true); // 승격 후 v4 스키마 통과
 	const v2 = { ddVersion: 2, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
-	assert.strictEqual(DDModel.migrate(v2).ddVersion, 3);
+	assert.strictEqual(DDModel.migrate(v2).ddVersion, 4);
+	const v3 = { ddVersion: 3, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
+	assert.strictEqual(DDModel.migrate(v3).ddVersion, 4);
 });
 
 // ---- anchor ----------------------------------------------------------------

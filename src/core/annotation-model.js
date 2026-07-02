@@ -10,7 +10,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	const DD_VERSION = 3;               // v3 — 부모-자식 계층(parentId) 도입. v1(마킹없음)·v2(계층없음)는 migrate 로 승격.
+	const DD_VERSION = 4;               // v4 — 문서 메타(docMeta: 표지·History·개요·플로우) 도입. v1~v3 은 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
 	const TYPES = ['pin', 'box'];
 	const ANCHOR_MODES = ['element', 'coord'];
@@ -53,14 +53,37 @@
 	}
 
 	// 빈 주석 세트 — source.kind 는 목업 판별 결과('spec-html' | 'generic').
+	//   docMeta = 정책부(표지·History·개요·플로우) 스냅샷. null=미추출/없음(generic). 저장 시 목업에서 뽑아 채운다.
 	function createSet(sourceKind) {
 		return {
 			ddVersion: DD_VERSION,
 			tool: TOOL_NAME,
 			savedAt: '',
 			source: { kind: SOURCE_KINDS.includes(sourceKind) ? sourceKind : 'generic' },
+			docMeta: null,
 			annotations: [],
 		};
+	}
+
+	// 문서 메타 정규화 — 목업에서 뽑은 raw(OVERVIEW·HISTORY)를 안전한 스키마로 다듬는다(순수 로직·DOM 무관).
+	//   내용이 하나도 없으면 null 반환 → 정책부 섹션 생략(generic·OVERVIEW 없는 목업). 있으면 저장본에 캐싱.
+	function normalizeDocMeta(raw) {
+		if (!raw || typeof raw !== 'object') return null;
+		const str = (v) => (v == null ? '' : String(v));
+		const ov = raw.overview && typeof raw.overview === 'object' ? raw.overview : {};
+		const meta = {
+			title: str(raw.title),
+			version: str(raw.version),
+			history: Array.isArray(raw.history) ? raw.history.map((h) => ({
+				no: str(h && h.no), date: str(h && h.date), ver: str(h && h.ver),
+				content: str(h && h.content), author: str(h && h.author),
+			})) : [],
+			overview: { 기능정의: str(ov.기능정의), 추진배경: str(ov.추진배경), 작업범위: str(ov.작업범위) },
+			flows: Array.isArray(raw.flows) ? raw.flows.map((f) => ({ id: str(f && f.id), name: str(f && f.name) })) : [],
+		};
+		const hasOv = meta.overview.기능정의 || meta.overview.추진배경 || meta.overview.작업범위;
+		const empty = !meta.title && !meta.version && !meta.history.length && !hasOv && !meta.flows.length;
+		return empty ? null : meta;
 	}
 
 	// 주석 1건 — props 로 부분 지정, 나머지는 기본값. anchor/coord 는 호출자가 채운다.
@@ -113,11 +136,12 @@
 		return { status, label, tooltip: parts.join(' · ') };
 	}
 
-	// 저장본 로드 시 스키마 승격 — v1(마킹 없음)·v2(계층 없음) → v3. 데이터 손실 없음.
-	//   parentId 키가 없는 옛 주석은 렌더가 a.parentId 를 옵셔널(undefined=최상위)로 읽어 그대로 동작 — 버전만 올린다.
+	// 저장본 로드 시 스키마 승격 — v1(마킹 없음)·v2(계층 없음)·v3(docMeta 없음) → v4. 데이터 손실 없음.
+	//   parentId·docMeta 키가 없는 옛 세트는 렌더가 옵셔널로 읽어 그대로 동작 — 버전 올리고 docMeta 는 null 로 채운다.
 	function migrate(set) {
 		if (!set || typeof set !== 'object') return set;
 		if (typeof set.ddVersion === 'number' && set.ddVersion < DD_VERSION) set.ddVersion = DD_VERSION;
+		if (!('docMeta' in set)) set.docMeta = null;
 		return set;
 	}
 
@@ -166,6 +190,7 @@
 		const errs = [];
 		if (!set || typeof set !== 'object') return { ok: false, errors: ['세트가 객체가 아님'] };
 		if (!(set.ddVersion >= 1 && set.ddVersion <= DD_VERSION)) errs.push(`ddVersion: 1~${DD_VERSION} 이어야 함 (현재 ${set.ddVersion})`); // v1 저장본 수용 → migrate 로 승격
+		if (set.docMeta != null && typeof set.docMeta !== 'object') errs.push('docMeta: 객체|null 이어야 함'); // 정책부 스냅샷(옵셔널)
 		if (!Array.isArray(set.annotations)) errs.push('annotations: 배열 필수');
 		else {
 			const seen = new Set();
@@ -180,5 +205,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, normalizeDocMeta, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate };
 });
