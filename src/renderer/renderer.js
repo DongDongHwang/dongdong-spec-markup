@@ -11,7 +11,12 @@
 const docpath = document.getElementById('docpath');
 const splitBtn = document.getElementById('split-btn');
 const newWinBtn = document.getElementById('newwin-btn');
+const editBtn = document.getElementById('edit-btn');
 const panes = document.getElementById('panes');
+const annotPanel = document.getElementById('annot-panel');
+const annotList = document.getElementById('annot-list');
+const apCount = document.getElementById('ap-count');
+const apPullback = document.getElementById('ap-pullback');
 
 // 문서 없을 때 탭에 표시하는 웰컴.
 const WELCOME_HTML =
@@ -86,6 +91,7 @@ function createTab(group) {
 	contentEl.append(welcomeEl, frame);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
+		editMode: false, dirty: false, // M3 — 주석 편집 토글 + 미저장 표시(저장은 M5)
 		contentEl, welcomeEl, frame,
 		navHistory: [], navIndex: -1,
 	};
@@ -114,14 +120,51 @@ function guardIframeNav(frame) {
 	}, true);
 }
 
-// 오버레이 부착 (M2 읽기전용) — 문서 load 마다 이전 컨트롤러를 버리고 새 문서에 다시 심는다.
-// 주석 세트가 없는 문서(일반 목업)는 아무것도 안 심는다 — 목업 원형 그대로.
+// 오버레이 부착 — 문서 load 마다 이전 컨트롤러를 버리고 새 문서에 다시 심는다.
+// 주석도 없고 편집 모드도 아닌 문서(일반 목업)는 아무것도 안 심는다 — 목업 원형 그대로.
 function attachOverlay(tab) {
 	if (tab.overlay) { tab.overlay.detach(); tab.overlay = null; }
 	const set = tab.annotations;
-	if (!set || !Array.isArray(set.annotations) || set.annotations.length === 0) return;
-	tab.overlay = DDOverlay.attach(tab.frame, set);
+	const has = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
+	if (!has && !tab.editMode) return;
+	if (!set) return;
+	tab.overlay = DDOverlay.attach(tab.frame, set, {
+		editable: tab.editMode,
+		onChange: () => { markDirty(tab); renderAnnotPanel(); },
+		onSelect: (id) => highlightAnnotRow(id),
+		onDeleteRequest: (id) => removeAnnotation(tab, id),
+	});
 }
+
+// 주석 삭제 — 당김 여부는 패널 체크박스가 결정. 오버레이 Delete 키·패널 × 공용.
+function removeAnnotation(tab, id) {
+	if (!tab.annotations) return;
+	DDNumbering.remove(tab.annotations, id, { pullBack: !apPullback || apPullback.checked });
+	if (tab.overlay) tab.overlay.refresh();
+	markDirty(tab);
+	renderAnnotPanel();
+}
+
+// 미저장 표시 — 탭 제목 ● (저장 왕복은 M5. 그 전까지 편집은 메모리에만 산다)
+function markDirty(tab) {
+	if (tab.dirty) return;
+	tab.dirty = true;
+	renderTabstrip(groupOf(tab));
+}
+
+// 편집 모드 토글 — 주석 세트가 없으면 여기서 처음 만든다(spec-html 판별은 APP_DATA 유무).
+function toggleEdit() {
+	const tab = activeTab();
+	if (!tab || !tab.docPath) return;
+	tab.editMode = !tab.editMode;
+	if (tab.editMode && !tab.annotations) {
+		tab.annotations = DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
+	}
+	if (tab.overlay) tab.overlay.setEditable(tab.editMode);
+	else attachOverlay(tab);
+	syncTopbar();
+}
+if (editBtn) editBtn.addEventListener('click', toggleEdit);
 
 // 활성 그룹 전환 (시각 강조·topbar 반영)
 function setActiveGroup(id) {
@@ -165,7 +208,7 @@ function renderTabstrip(group) {
 		chip.title = t.docPath || '(빈 문서)';
 		const label = document.createElement('span');
 		label.className = 'tab-label';
-		label.textContent = tabTitle(t);
+		label.textContent = (t.dirty ? '● ' : '') + tabTitle(t);
 		const close = document.createElement('span');
 		close.className = 'tab-close';
 		close.textContent = '×';
@@ -203,6 +246,8 @@ function pushTabHistory(tab, filePath) {
 // 문서를 탭에 로드 — 메인에 read-html 요청 후 iframe srcdoc 으로 렌더. history:false 는 뒤로/앞으로.
 async function loadDocIntoTab(tab, filePath, opts) {
 	opts = opts || {};
+	// 미저장 주석 가드 — 재로드는 파일에서 다시 읽으므로 메모리 편집분이 사라진다(저장은 M5)
+	if (tab.dirty && !window.confirm('저장하지 않은 주석이 있습니다. 이동하면 사라집니다.\n계속할까요?')) return;
 	const doc = await window.ddsv.readHtml(filePath);
 	if (!doc || doc.exists === false) {
 		window.alert(`열기 실패\n${filePath}\n${(doc && doc.error) || '파일을 찾을 수 없습니다.'}`);
@@ -214,6 +259,8 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	tab.pure = io.pure;
 	tab.annotations = io.set;
 	tab.exists = true;
+	tab.editMode = false; // 새 문서 = 뷰어 모드부터 (편집은 명시 토글)
+	tab.dirty = false;
 	if (opts.history !== false) pushTabHistory(tab, tab.docPath);
 	tab.frame.srcdoc = tab.pure; // iframe 격리 렌더(순수 목업) — load 시 네비 가드+오버레이 재부착
 	renderTabView(tab);
@@ -321,6 +368,7 @@ function removeGroup(group) {
 function closeTab(group, tab) {
 	const idx = group.tabs.indexOf(tab);
 	if (idx < 0) return;
+	if (tab.dirty && !window.confirm('저장하지 않은 주석이 있습니다. 닫으면 사라집니다.\n닫을까요?')) return;
 	tab.contentEl.remove();
 	group.tabs.splice(idx, 1);
 	if (group.tabs.length === 0) {
@@ -387,15 +435,145 @@ function moveTab(tab, fromGroup, toGroup, toIndex) {
 	syncTopbar();
 }
 
-// topbar(경로·분할 버튼)를 활성 탭 상태로 동기화
+// topbar(경로·편집·분할 버튼) + 주석 패널을 활성 탭 상태로 동기화
 function syncTopbar() {
 	const tab = activeTab();
 	docpath.textContent = tab ? tab.docPath : '';
 	const hasDoc = !!(tab && tab.docPath);
 	if (splitBtn) splitBtn.disabled = !hasDoc || groups.length >= MAX_GROUPS;
+	if (editBtn) {
+		editBtn.disabled = !hasDoc;
+		editBtn.classList.toggle('is-on', !!(tab && tab.editMode));
+	}
+	renderAnnotPanel();
 }
 
 if (splitBtn) splitBtn.addEventListener('click', splitActive);
+
+// ---- 주석 패널 (M3 번호 자유관리) --------------------------------------------
+// 활성 탭의 주석 세트를 seq 순 리스트로. 행 클릭 = 오버레이 선택 / 더블클릭 = 라벨 편집 /
+// 드래그 = 재정렬(중간 삽입 밀기) / 자동 배지 클릭 = 수동↔자동 전환 / × = 삭제(당김 옵션).
+let dragAnnotId = null; // 행 드래그 재정렬 중인 주석 id
+
+function annotTypeIcon(a) { return a.type === 'box' ? '▭' : '📍'; }
+
+function renderAnnotPanel() {
+	if (!annotPanel) return;
+	const tab = activeTab();
+	const set = tab && tab.annotations;
+	const anns = set && Array.isArray(set.annotations) ? DDNumbering.sortedBySeq(set) : [];
+	const show = !!(tab && tab.docPath && (tab.editMode || anns.length > 0));
+	annotPanel.classList.toggle('hidden', !show);
+	if (!show) return;
+	apCount.textContent = String(anns.length);
+	annotList.innerHTML = '';
+	for (const a of anns) {
+		const li = document.createElement('li');
+		li.className = 'annot-row';
+		li.dataset.annotId = a.id;
+		li.draggable = true;
+		const label = document.createElement('span');
+		label.className = 'annot-label' + (a.autoNumber ? '' : ' is-manual');
+		label.textContent = a.label;
+		label.title = a.autoNumber ? '자동 번호 — 더블클릭으로 직접 수정(수동 고정)' : '수동 번호 — 더블클릭 수정';
+		const type = document.createElement('span');
+		type.className = 'annot-type';
+		type.textContent = annotTypeIcon(a);
+		const text = document.createElement('span');
+		text.className = 'annot-text';
+		text.textContent = (a.body && a.body.plain) || (a.anchor && a.anchor.mode === 'element' ? a.anchor.elementId : '(설명 없음 — M4)');
+		const auto = document.createElement('button');
+		auto.className = 'annot-auto';
+		auto.type = 'button';
+		auto.textContent = a.autoNumber ? '자동' : '수동';
+		auto.title = a.autoNumber ? '자동 번호(순서 따라 재번호)' : '클릭 = 자동 번호로 복귀';
+		const rm = document.createElement('button');
+		rm.className = 'annot-remove';
+		rm.type = 'button';
+		rm.textContent = '×';
+		rm.title = '삭제 (Delete)';
+		li.append(label, type, text, auto, rm);
+		// 선택 동기화 — 행 클릭 → 오버레이 핀 하이라이트
+		li.addEventListener('click', (e) => {
+			if (e.target === rm || e.target === auto) return;
+			if (tab.overlay) tab.overlay.select(a.id);
+			highlightAnnotRow(a.id);
+		});
+		// 라벨 더블클릭 → 인라인 입력 (Enter/blur 확정, Esc 취소) — 수동 고정
+		label.addEventListener('dblclick', (e) => {
+			e.stopPropagation();
+			const input = document.createElement('input');
+			input.className = 'annot-label-input';
+			input.value = a.label;
+			label.replaceWith(input);
+			input.focus();
+			input.select();
+			let done = false;
+			const commit = (save) => {
+				if (done) return;
+				done = true;
+				if (save && input.value.trim()) {
+					DDNumbering.setLabel(set, a.id, input.value.trim());
+					afterAnnotMutate(tab);
+				} else {
+					renderAnnotPanel();
+				}
+			};
+			input.addEventListener('keydown', (ev) => {
+				if (ev.key === 'Enter') commit(true);
+				else if (ev.key === 'Escape') commit(false);
+			});
+			input.addEventListener('blur', () => commit(true));
+		});
+		auto.addEventListener('click', () => {
+			if (a.autoNumber) return; // 이미 자동 — 표시용
+			DDNumbering.setAuto(set, a.id);
+			afterAnnotMutate(tab);
+		});
+		rm.addEventListener('click', () => removeAnnotation(tab, a.id));
+		// 행 드래그 재정렬 — 드롭 대상 행의 seq 자리로 moveTo(중간 삽입 밀기)
+		li.addEventListener('dragstart', (e) => {
+			dragAnnotId = a.id;
+			e.dataTransfer.effectAllowed = 'move';
+			li.classList.add('dragging');
+		});
+		li.addEventListener('dragend', () => { dragAnnotId = null; li.classList.remove('dragging'); });
+		li.addEventListener('dragover', (e) => {
+			if (!dragAnnotId || dragAnnotId === a.id) return;
+			e.preventDefault();
+			e.dataTransfer.dropEffect = 'move';
+			li.classList.add('drop-target');
+		});
+		li.addEventListener('dragleave', () => li.classList.remove('drop-target'));
+		li.addEventListener('drop', (e) => {
+			li.classList.remove('drop-target');
+			if (!dragAnnotId || dragAnnotId === a.id) return;
+			e.preventDefault();
+			DDNumbering.moveTo(set, dragAnnotId, a.seq);
+			dragAnnotId = null;
+			afterAnnotMutate(tab);
+		});
+		annotList.appendChild(li);
+	}
+	if (tab.overlay) highlightAnnotRow(tab.overlay.getSelected());
+}
+
+// 패널 쪽 구조 변경(라벨·재정렬·자동복귀) 공통 후처리 — 오버레이 재생성 + 패널 재렌더 + 더티
+function afterAnnotMutate(tab) {
+	if (tab.overlay) tab.overlay.refresh();
+	markDirty(tab);
+	renderAnnotPanel();
+}
+
+// 오버레이에서 선택 → 패널 행 하이라이트 + 스크롤
+function highlightAnnotRow(id) {
+	if (!annotList) return;
+	annotList.querySelectorAll('.annot-row').forEach((el) => {
+		const on = !!id && el.dataset.annotId === id;
+		el.classList.toggle('is-active', on);
+		if (on) el.scrollIntoView({ block: 'nearest' });
+	});
+}
 
 // 브라우저식 뒤로/앞으로 — 활성 탭의 방문 기록.
 function goBack() {
@@ -416,10 +594,13 @@ window.addEventListener('mouseup', (e) => {
 	else if (e.button === 4) { e.preventDefault(); goForward(); }
 });
 
-// 단축키 — Ctrl+\ 분할, Alt+←/→ 이동 (활성 탭 기준). 줌은 메인의 before-input-event 가 처리.
+// 단축키 — Ctrl+E 주석 편집, Ctrl+\ 분할, Alt+←/→ 이동 (활성 탭 기준). 줌은 메인의 before-input-event 가 처리.
 document.addEventListener('keydown', (e) => {
 	const ctrl = e.ctrlKey || e.metaKey;
-	if (ctrl && e.key === '\\') {
+	if (ctrl && (e.key === 'e' || e.key === 'E')) {
+		e.preventDefault();
+		toggleEdit();
+	} else if (ctrl && e.key === '\\') {
 		e.preventDefault();
 		splitActive();
 	} else if (e.altKey && e.key === 'ArrowLeft') {

@@ -1,15 +1,19 @@
-// 오버레이 — 목업 iframe "문서 내부"에 #dd-overlay-root 를 주입해 핀·박스를 렌더한다 (M2 읽기전용).
+// 오버레이 — 목업 iframe "문서 내부"에 #dd-overlay-root 를 주입해 핀·박스를 렌더한다 (M2 읽기 + M3 편집).
 //   같은 좌표계·스크롤·resize 이벤트 안에 살므로 좌표 이중화가 없다. sandbox 미사용 전제(same-origin).
 //   원칙 = 저장은 비율/논리키(annotation), 렌더는 실시간 재계산 — element 모드는 매 layout 마다
 //   요소 rect 를 다시 읽어 리사이즈·화면전환·조건분기 재배치에도 따라간다. 해석 불가(다른 화면·display:none)
 //   주석은 숨은 트레이에 보존했다가 요소가 돌아오면 복귀한다.
-// 의존 — window.DDAnchor (core/anchor.js, index.html 에서 먼저 로드).
+//   M3 편집 모드 — 목업 클릭 = 핀(앵커 mode 자동판정) / 드래그 = 박스 / 핀·박스 드래그 = 이동(재앵커) /
+//   클릭 = 선택 / Delete = 삭제 요청. 편집 중엔 목업 자체 인터랙션(goScreen 등)을 캡처 단계에서 차단해
+//   "버튼을 찍으려다 화면이 넘어가는" 오동작을 막는다(화면 이동은 뷰어 모드에서).
+// 의존 — window.DDAnchor·DDModel·DDNumbering (core, index.html 에서 먼저 로드).
 
 'use strict';
 
 const DDOverlay = (() => {
 	const ROOT_ID = 'dd-overlay-root';
 	const STYLE_ID = 'dd-overlay-style';
+	const DRAG_MIN = 5; // px — 이 미만 이동은 클릭으로 본다
 
 	// 오버레이 CSS — 전부 dd- prefix (목업 무오염). M5 저장 런타임에서도 그대로 재사용할 수 있게 한 덩어리로 유지.
 	const OVERLAY_CSS = `
@@ -29,6 +33,11 @@ const DDOverlay = (() => {
 	background: #7460D9; color: #fff; border-radius: 4px 4px 4px 0;
 	font: 700 10px/1 Pretendard, -apple-system, sans-serif; pointer-events: auto; user-select: none;
 }
+#${ROOT_ID} .dd-selected { outline: 3px solid rgba(116,96,217,.45); outline-offset: 2px; }
+#${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
+#${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
+#${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
+body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
 	position: fixed; right: 10px; bottom: 10px; z-index: 99991;
 	max-width: 240px; padding: 6px 10px; background: rgba(26,29,35,.88); color: #cbd5e1;
@@ -62,16 +71,32 @@ const DDOverlay = (() => {
 		return r.width > 0 || r.height > 0;
 	}
 
-	// spec-html 목업이면 현재 화면 ID (자유형이면 null) — screenId 불일치 주석은 렌더 스킵.
-	function currentScreenOf(win) {
-		try { return (win.APP_DATA && win.APP_DATA.currentScreen) || null; } catch (_) { return null; }
+	// spec-html 목업의 APP_DATA — `const APP_DATA` 는 전역 lexical 바인딩이라 win.APP_DATA 에 안 붙는다
+	// → realm 내 간접 eval 로 읽는다(같은 오리진). 객체 참조는 불변이라 attach 시 1회 캐시하면 된다.
+	function resolveAppData(win) {
+		try {
+			if (win.APP_DATA) return win.APP_DATA;
+			return win.eval('typeof APP_DATA === "undefined" ? null : APP_DATA') || null;
+		} catch (_) { return null; }
 	}
 
-	function attach(frame, set) {
+	// spec-html 목업 판별 — 셸(renderer)의 세트 kind 결정용.
+	function detectSpecHtml(frame) {
+		try { return !!resolveAppData(frame.contentWindow); } catch (_) { return false; }
+	}
+
+	function attach(frame, set, opts) {
+		opts = opts || {};
 		const doc = frame.contentDocument;
 		const win = frame.contentWindow;
 		if (!doc || !doc.body || !win) return null;
-		const annotations = (set && Array.isArray(set.annotations)) ? set.annotations : [];
+		let editable = !!opts.editable;
+		let selectedId = null;
+		const mock = resolveAppData(win); // spec-html APP_DATA (자유형이면 null)
+		// 현재 화면 ID — screenId 불일치 주석은 렌더 스킵(숨은 트레이 보존).
+		function currentScreen() {
+			try { return (mock && mock.currentScreen) || null; } catch (_) { return null; }
+		}
 
 		// 스타일 + 루트 + 트레이 주입 (형제 append — 목업 노드 무변형)
 		if (!doc.getElementById(STYLE_ID)) {
@@ -84,15 +109,20 @@ const DDOverlay = (() => {
 		if (root) root.remove(); // 같은 문서 재부착 방어
 		root = doc.createElement('div');
 		root.id = ROOT_ID;
+		root.classList.toggle('dd-editing', editable);
 		doc.body.appendChild(root);
+		const layer = doc.createElement('div'); // 주석 노드 전용 층 — rebuild 시 트레이는 보존
+		root.appendChild(layer);
 		const tray = doc.createElement('div');
 		tray.className = 'dd-tray';
 		tray.style.display = 'none';
 		root.appendChild(tray);
 
-		// 주석별 DOM 노드 — 1회 생성 후 layout 마다 위치만 갱신 (id 키)
+		function annotations() { return Array.isArray(set.annotations) ? set.annotations : []; }
+
+		// 주석별 DOM 노드 — 구조 변경(추가·삭제·재번호) 시 rebuildNodes 로 전체 재생성 (수십 개 규모라 싸다)
 		const nodes = new Map();
-		for (const a of annotations) {
+		function makeNode(a) {
 			let el;
 			if (a.type === 'box') {
 				el = doc.createElement('div');
@@ -112,38 +142,53 @@ const DDOverlay = (() => {
 				else el.style.background = a.style.color;
 			}
 			const plain = a.body && a.body.plain;
-			if (plain) el.title = plain; // M2 읽기전용 — 네이티브 툴팁으로 설명 확인
+			if (plain) el.title = plain; // 읽기 모드 — 네이티브 툴팁으로 설명 확인
 			el.style.display = 'none';
-			root.appendChild(el);
+			layer.appendChild(el);
 			nodes.set(a.id, el);
+			return el;
+		}
+		function rebuildNodes() {
+			nodes.clear();
+			layer.innerHTML = '';
+			for (const a of annotations()) makeNode(a);
+			applySelection();
+		}
+		function applySelection() {
+			for (const [id, el] of nodes) el.classList.toggle('dd-selected', id === selectedId);
+		}
+		function select(id) {
+			selectedId = id;
+			applySelection();
+			if (opts.onSelect) opts.onSelect(id);
 		}
 
 		let lastStats = { visible: 0, hidden: 0 };
+		let dragNodeId = null; // 드래그 중 노드 — layout 이 위치를 되돌리지 않게 스킵
 
 		// 재정렬 본체 — 요소/기준 rect 를 매번 다시 읽고 root 기준 상대 px 로 배치.
 		//   rootRect 와의 차로 계산하므로 body 마진·문서 스크롤 상태와 무관하게 정확하다.
 		function layout() {
 			if (!doc.body || !doc.getElementById(ROOT_ID)) return;
 			const rootRect = root.getBoundingClientRect();
-			const screen = currentScreenOf(win);
+			const screen = currentScreen();
 			const hiddenLabels = [];
 			let visible = 0;
-			for (const a of annotations) {
+			for (const a of annotations()) {
 				const node = nodes.get(a.id);
 				if (!node) continue;
+				if (a.id === dragNodeId) { visible++; continue; } // 드래그 중 — 손이 위치 소유
 				let abs = null; // { left, top, width?, height? } — viewport 좌표
-				if (a.anchor && a.anchor.mode === 'element') {
-					if (a.anchor.screenId && screen && a.anchor.screenId !== screen) {
-						abs = null; // 다른 화면 소속 — 렌더 스킵
-					} else {
-						const target = queryElement(doc, a.anchor.elementId);
-						if (isRenderable(target)) {
-							const r = target.getBoundingClientRect();
-							const rect = { left: r.left, top: r.top, width: r.width, height: r.height };
-							abs = a.type === 'box'
-								? DDAnchor.boxRectFromElement(rect, a.anchor.rectPct)
-								: DDAnchor.pinPointFromElement(rect, a.anchor.offsetPct);
-						}
+				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) {
+					abs = null; // 다른 화면 소속(element·coord 공통) — 렌더 스킵
+				} else if (a.anchor && a.anchor.mode === 'element') {
+					const target = queryElement(doc, a.anchor.elementId);
+					if (isRenderable(target)) {
+						const r = target.getBoundingClientRect();
+						const rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+						abs = a.type === 'box'
+							? DDAnchor.boxRectFromElement(rect, a.anchor.rectPct)
+							: DDAnchor.pinPointFromElement(rect, a.anchor.offsetPct);
 					}
 				} else if (a.coord) {
 					const basis = basisElement(doc, a.coord.basis);
@@ -184,7 +229,211 @@ const DDOverlay = (() => {
 			win.requestAnimationFrame(() => { pending = false; layout(); });
 		}
 
-		// 재정렬 트리거 — resize / 내부 스크롤(캡처) / DOM 변이(goScreen 재렌더·조건분기 class/style)
+		// ---- M3 편집 — 찍기·이동·박스·선택·삭제 ------------------------------------
+
+		// 클릭 지점의 목업 요소 — 오버레이 자신은 제외하고 [data-element-id] 조상까지 올린다.
+		function elementUnderPoint(x, y) {
+			const stack = doc.elementsFromPoint ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
+			for (const el of stack) {
+				if (!el || root.contains(el)) continue;
+				const hit = el.closest ? el.closest('[data-element-id]') : null;
+				return hit || null; // 첫 비오버레이 요소에서 판정 종료 (없으면 coord 모드)
+			}
+			return null;
+		}
+
+		// coord 기준 선택 — 대상이 프레임 안이면 frame 비율, 밖이면 body 비율(비율이 -0.5~1.5
+		// 스키마 범위를 벗어나지 않게 — 프레임 왼쪽 여백 클릭 시 x=-0.6 같은 값 방지).
+		function coordBasisFor(absRect) {
+			const frameEl = basisElement(doc, 'frame');
+			if (frameEl !== doc.body) {
+				const fr = frameEl.getBoundingClientRect();
+				const inside = absRect.left >= fr.left && absRect.top >= fr.top
+					&& absRect.left + (absRect.width || 0) <= fr.right && absRect.top + (absRect.height || 0) <= fr.bottom;
+				if (inside && fr.width > 0) return { basis: 'frame', rect: { left: fr.left, top: fr.top, width: fr.width, height: fr.height } };
+			}
+			const br = doc.body.getBoundingClientRect();
+			return { basis: 'body', rect: { left: br.left, top: br.top, width: br.width, height: br.height } };
+		}
+
+		// 핀 앵커 자동판정 — 요소 위면 element(따라감), 빈 곳이면 coord(프레임/바디 비율 고정).
+		function pinAnchorAt(x, y) {
+			const screen = currentScreen();
+			const el = elementUnderPoint(x, y);
+			if (el) {
+				const r = el.getBoundingClientRect();
+				const anchor = {
+					mode: 'element',
+					elementId: el.getAttribute('data-element-id'),
+					offsetPct: DDAnchor.offsetPctFromPoint({ left: x, top: y }, { left: r.left, top: r.top, width: r.width, height: r.height }),
+				};
+				if (screen) anchor.screenId = screen;
+				return { anchor, coord: null };
+			}
+			const b = coordBasisFor({ left: x, top: y, width: 0, height: 0 });
+			const p = DDAnchor.coordFromPoint({ left: x, top: y }, b.rect);
+			const anchor = { mode: 'coord' };
+			if (screen) anchor.screenId = screen;
+			return { anchor, coord: { basis: b.basis, x: p.x, y: p.y } };
+		}
+
+		// 박스 앵커 자동판정 — 렉트가 한 요소 안에 온전히 들어가면 element(rectPct), 아니면 coord.
+		function boxAnchorFor(absRect) {
+			const screen = currentScreen();
+			const cx = absRect.left + absRect.width / 2;
+			const cy = absRect.top + absRect.height / 2;
+			const el = elementUnderPoint(cx, cy);
+			if (el) {
+				const r = el.getBoundingClientRect();
+				const inside = absRect.left >= r.left - 1 && absRect.top >= r.top - 1
+					&& absRect.left + absRect.width <= r.right + 1 && absRect.top + absRect.height <= r.bottom + 1;
+				if (inside && r.width > 0 && r.height > 0) {
+					const anchor = {
+						mode: 'element',
+						elementId: el.getAttribute('data-element-id'),
+						rectPct: DDAnchor.coordFromRect(absRect, { left: r.left, top: r.top, width: r.width, height: r.height }),
+					};
+					if (screen) anchor.screenId = screen;
+					return { anchor, coord: null };
+				}
+			}
+			const b = coordBasisFor(absRect);
+			const c = DDAnchor.coordFromRect(absRect, b.rect);
+			const anchor = { mode: 'coord' };
+			if (screen) anchor.screenId = screen;
+			return { anchor, coord: Object.assign({ basis: b.basis }, c) };
+		}
+
+		function notifyChange() { if (opts.onChange) opts.onChange(); }
+
+		function createPin(x, y) {
+			const hit = pinAnchorAt(x, y);
+			const a = DDModel.createAnnotation({ type: 'pin', anchor: hit.anchor, coord: hit.coord });
+			DDNumbering.add(set, a);
+			rebuildNodes();
+			layout();
+			select(a.id);
+			notifyChange();
+		}
+		function createBox(absRect) {
+			const hit = boxAnchorFor(absRect);
+			const a = DDModel.createAnnotation({ type: 'box', anchor: hit.anchor, coord: hit.coord, style: { variant: 'dashed', color: '#7460D9' } });
+			DDNumbering.add(set, a);
+			rebuildNodes();
+			layout();
+			select(a.id);
+			notifyChange();
+		}
+
+		// 이동 확정 — 드롭 지점에서 앵커를 다시 판정한다(요소↔빈 곳 넘나들면 mode 도 전환).
+		function reanchor(a, node) {
+			const r = node.getBoundingClientRect();
+			if (a.type === 'box') {
+				const abs = { left: r.left, top: r.top, width: r.width, height: r.height };
+				const hit = boxAnchorFor(abs);
+				a.anchor = hit.anchor;
+				a.coord = hit.coord;
+			} else {
+				const cx = r.left + r.width / 2;
+				const cy = r.top + r.height / 2;
+				const hit = pinAnchorAt(cx, cy);
+				a.anchor = hit.anchor;
+				a.coord = hit.coord;
+			}
+			layout();
+			notifyChange();
+		}
+
+		// 제스처 상태기 — mousedown 시작, DRAG_MIN 넘으면 드래그(이동/러버밴드), 미만이면 클릭(선택/핀 생성).
+		let gesture = null;
+		function onMouseDown(e) {
+			if (!editable || e.button !== 0) return;
+			e.preventDefault();
+			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 뷰어 모드에서
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box') : null;
+			if (ddEl && ddEl.dataset.ddId) {
+				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
+				if (!a) return;
+				select(a.id);
+				const nr = ddEl.getBoundingClientRect();
+				gesture = {
+					kind: 'move', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
+					// 노드 좌상단(viewport) — 이동량을 root 상대 px 로 되적용하기 위한 기준
+					nx: nr.left, ny: nr.top,
+				};
+				dragNodeId = a.id;
+			} else {
+				gesture = { kind: 'create', sx: e.clientX, sy: e.clientY, moved: false, rubber: null };
+			}
+		}
+		function onMouseMove(e) {
+			if (!editable || !gesture) return;
+			const dx = e.clientX - gesture.sx;
+			const dy = e.clientY - gesture.sy;
+			if (!gesture.moved && Math.abs(dx) < DRAG_MIN && Math.abs(dy) < DRAG_MIN) return;
+			gesture.moved = true;
+			const rootRect = root.getBoundingClientRect();
+			if (gesture.kind === 'move') {
+				const isPin = gesture.node.classList.contains('dd-pin');
+				// 핀은 translate(-50%,-50%) 라 중심 기준, 박스는 좌상단 기준으로 되적용
+				const left = gesture.nx + dx - rootRect.left + (isPin ? gesture.node.offsetWidth / 2 : 0);
+				const top = gesture.ny + dy - rootRect.top + (isPin ? gesture.node.offsetHeight / 2 : 0);
+				gesture.node.style.left = left + 'px';
+				gesture.node.style.top = top + 'px';
+			} else {
+				if (!gesture.rubber) {
+					gesture.rubber = doc.createElement('div');
+					gesture.rubber.className = 'dd-rubber';
+					root.appendChild(gesture.rubber);
+				}
+				const left = Math.min(gesture.sx, e.clientX);
+				const top = Math.min(gesture.sy, e.clientY);
+				gesture.rubber.style.left = (left - rootRect.left) + 'px';
+				gesture.rubber.style.top = (top - rootRect.top) + 'px';
+				gesture.rubber.style.width = Math.abs(dx) + 'px';
+				gesture.rubber.style.height = Math.abs(dy) + 'px';
+			}
+		}
+		function onMouseUp(e) {
+			if (!editable || !gesture) return;
+			const g = gesture;
+			gesture = null;
+			dragNodeId = null;
+			if (g.kind === 'move') {
+				if (g.moved) reanchor(g.a, g.node);
+				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
+			}
+			if (g.rubber) g.rubber.remove();
+			if (g.moved) {
+				const left = Math.min(g.sx, e.clientX);
+				const top = Math.min(g.sy, e.clientY);
+				const w = Math.abs(e.clientX - g.sx);
+				const h = Math.abs(e.clientY - g.sy);
+				if (w >= DRAG_MIN && h >= DRAG_MIN) createBox({ left, top, width: w, height: h });
+			} else {
+				createPin(g.sx, g.sy);
+			}
+		}
+		function onClickCapture(e) {
+			if (!editable) return;
+			e.preventDefault();
+			e.stopPropagation(); // mousedown 차단과 짝 — 목업 click 핸들러(goScreen 등)까지 확실히 봉인
+		}
+		function onKeyDown(e) {
+			if (!editable) return;
+			if (e.key === 'Escape') { select(null); return; }
+			if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+				e.preventDefault();
+				if (opts.onDeleteRequest) opts.onDeleteRequest(selectedId);
+			}
+		}
+		doc.addEventListener('mousedown', onMouseDown, true);
+		doc.addEventListener('mousemove', onMouseMove, true);
+		doc.addEventListener('mouseup', onMouseUp, true);
+		doc.addEventListener('click', onClickCapture, true);
+		doc.addEventListener('keydown', onKeyDown, true);
+
+		// ---- 재정렬 트리거 — resize / 내부 스크롤(캡처) / DOM 변이(goScreen 재렌더·조건분기 class/style)
 		const onResize = () => schedule();
 		const onScroll = () => schedule();
 		win.addEventListener('resize', onResize);
@@ -204,18 +453,37 @@ const DDOverlay = (() => {
 			if (doc.body) ro.observe(doc.body);
 		}
 
+		rebuildNodes();
 		layout();
-		console.log(`[dd-overlay] attach — 주석 ${annotations.length}건 (표시 ${lastStats.visible} / 숨김 ${lastStats.hidden})`);
+		console.log(`[dd-overlay] attach — 주석 ${annotations().length}건 (표시 ${lastStats.visible} / 숨김 ${lastStats.hidden})${editable ? ' · 편집 모드' : ''}`);
 
 		return {
 			relayout: layout,
 			stats: () => lastStats,
+			select,
+			getSelected: () => selectedId,
+			// 패널(셸) 쪽 구조 변경(삭제·재번호·라벨) 후 호출 — 노드 전체 재생성 + 재배치
+			refresh() {
+				if (selectedId && !annotations().some((a) => a.id === selectedId)) selectedId = null;
+				rebuildNodes();
+				layout();
+			},
+			setEditable(on) {
+				editable = !!on;
+				root.classList.toggle('dd-editing', editable);
+				if (!editable) { gesture = null; dragNodeId = null; select(null); }
+			},
 			detach() {
 				try {
 					mo.disconnect();
 					if (ro) ro.disconnect();
 					win.removeEventListener('resize', onResize);
 					doc.removeEventListener('scroll', onScroll, true);
+					doc.removeEventListener('mousedown', onMouseDown, true);
+					doc.removeEventListener('mousemove', onMouseMove, true);
+					doc.removeEventListener('mouseup', onMouseUp, true);
+					doc.removeEventListener('click', onClickCapture, true);
+					doc.removeEventListener('keydown', onKeyDown, true);
 					root.remove();
 					const st = doc.getElementById(STYLE_ID);
 					if (st) st.remove();
@@ -224,5 +492,5 @@ const DDOverlay = (() => {
 		};
 	}
 
-	return { attach };
+	return { attach, detectSpecHtml };
 })();
