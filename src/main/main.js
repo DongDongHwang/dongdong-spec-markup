@@ -74,7 +74,7 @@ function createWindow(open) {
 	const w = new BrowserWindow({
 		width: 1360,
 		height: 860,
-		title: 'Dong Dong Spec Viewer for Windows',
+		title: 'Dong Dong Spec Markup for Windows',
 		backgroundColor: '#ffffff',
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.js'),
@@ -124,7 +124,7 @@ function createWindow(open) {
 
 // 더블클릭/"연결 프로그램"으로 넘어온 파일 경로를 argv 에서 안전 추출.
 //   dev  : electron . "C:\x.html"  -> argv = [electron, '.', 'C:\x.html']
-//   배포 : "Dong Dong Spec Viewer.exe" "C:\x.html"   -> argv = [exe, 'C:\x.html']
+//   배포 : "Dong Dong Spec Markup.exe" "C:\x.html"   -> argv = [exe, 'C:\x.html']
 // argv[0] 은 실행 파일(.html 로 안 끝남)이라 i=1 부터 훑고, 플래그/'.'/존재하지 않는 경로는 건너뛴다.
 // (dev/배포 분기 없이 확장자 + 실제 파일 존재로 판정 — 패키지 환경 argv 변형에도 견고)
 function fileArgFrom(argv) {

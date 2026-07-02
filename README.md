@@ -1,52 +1,66 @@
-# Dong Dong MD Viewer for Windows
+# Dong Dong Spec Markup for Windows
 
-맥용 [CmdMD](https://github.com/johnfkoo951/CmdMD)(Swift/SwiftUI, review-first 마크다운 리더 + Obsidian 볼트 라우터)의 **윈도우판 — Dong Dong MD Viewer**. 맥 버전은 그대로 두고, 윈도우는 같은 동작을 Electron 으로 새로 만든다. 원본 Swift 는 한 줄도 컴파일되지 않으므로 이식이 아니라 재작성이며, 렌더 자산·마크다운 스펙·라우팅/템플릿/frontmatter 로직만 재활용한다.
+화면기획서(spec-html) 목업을 열어 **번호핀·범위박스·리치설명 주석**을 달고, **신규/기존·차수 마킹**을 찍고, **자기완결 HTML**로 저장하는 Electron 데스크톱 도구. 피그마 Dev Mode 의 "짚어서 설명" + 노션 서식을 화면기획 리뷰/핸드오프에 맞춰 가져왔다. 뷰어가 아니라 **주석·마킹 도구(markup)** 다 — 목업을 보기도 하지만 핵심은 그 위에 검토 의견을 얹는 것.
+
+CmdMD(원본 맥 앱, [johnfkoo951/CmdMD](https://github.com/johnfkoo951/CmdMD))의 Electron 셸·IPC·빌드 파이프라인을 재활용했고, 주석 엔진·앵커 수학·저장 왕복은 이 프로젝트에서 새로 만들었다.
+
+## 주요 기능
+
+- **주석** — 목업 클릭 = 번호핀 / 드래그 = 범위박스. 요소 위면 요소에 앵커(리사이즈·화면전환 추종), 빈 곳이면 프레임/바디 비율 고정.
+- **리치설명** — 자유 리치텍스트 + 5종 슬롯(기능/동작/데이터/비즈니스/기술) 토글.
+- **신규/기존 마킹** — 핀마다 신규/기존을 직접 지정. 신규는 차수(1·2·3차)·날짜·사유까지 기록. 신규 초록 / 2·3차 황색 배지 / 기존 무배지.
+- **번호 자유관리** — 자동 다음번호 / 수동 고정(계층 1-1·커스텀) / 삭제 시 당김 / 드래그 재정렬.
+- **Figma/PPT식 단축키** — Ctrl+B 볼드, Ctrl+D 복제, Ctrl+C/V 복사·붙여넣기, 화살표 미세이동(Shift 큰폭), Delete 삭제, Ctrl+Z/Ctrl+Shift+Z 되돌리기/다시.
+- **자기완결 저장** — 원본 목업 무변형 + `</body>` 앞에 주석 JSON·뷰어 런타임 인라인. dd 없이 브라우저로 열어도 핀·설명이 렌더된다. 저장 왕복 무손상·멱등.
+- **문서 뷰** — 현재 화면 소속 핀을 seq 순 번호·설명 표로(인쇄/PDF 대응).
+- **spec-html + generic 양쪽** — spec-html 목업이면 요소 앵커·화면 게이팅·초안 주입까지, 임의 HTML 이면 좌표 기반으로 동작.
 
 ## 스택
 
-- Electron (Chromium) — 창·셸
-- 프리뷰 렌더: markdown-it + highlight.js + Mermaid 11 + KaTeX 0.16(+mhchem), 원본과 동일하게 CDN 로드
-- 에디터(예정): Monaco 또는 CodeMirror 6 — 원본 NSTextView 커스텀 에디터를 대체
-- frontmatter: js-yaml (타입 보존)
-- 전부 JavaScript/TypeScript — 단일 언어로 AI 보조 제작·유지 용이
-
-## 상태 (2026-06-30)
-
-- 코어 로직 이식 완료 — 라우팅 매처 / 템플릿 토큰 / frontmatter 타입 보존(bool↔int 데이터손실 방지). **`npm test` 19/19 통과.**
-- Electron 셸 스캐폴딩 완료 — 파일 열기 → frontmatter 분리 → 렌더 프리뷰, Obsidian 볼트 자동 감지(%APPDATA%\obsidian\obsidian.json).
-- 윈도우 파일 연결 — `.md`·`.markdown`·`.mdown` 을 더블클릭·"연결 프로그램"으로 Dong Dong MD Viewer 에 연결해 바로 렌더(single-instance — 떠 있으면 같은 창에서 열기). 아래 §파일 연결 참고.
-- 렌더 파리티(진행) — 콜아웃 접기, 태스크 체크박스(시각 토글, 파일 미저장), 이미지 임베드 인라인 표시 추가.
-- 미완료 — 7개 CSS 테마, 노트 임베드 재귀 렌더, 에디터(Monaco), 3분할/탭/사이드바/인스펙터 UI, 보내기 시트, 앱 아이콘·서명.
+- Electron (Chromium) — 창·셸·IPC (CmdMD 윈도우판 재활용)
+- 순수 코어 모듈(UMD) — 앵커 수학 / 번호 관리 / 저장 왕복 / 주석 모델. node·브라우저 양쪽에서 테스트.
+- 목업은 `<iframe srcdoc>` 격리 렌더, 오버레이를 문서 내부에 주입해 단일 좌표계 유지.
+- 전부 JavaScript — 단일 언어로 AI 보조 제작·유지.
 
 ## 실행
 
 ```bash
 npm install        # electron 포함 전체 의존성
 npm start          # 앱 실행
-npm test           # 코어 로직 동작 동일성 테스트
+npm test           # 코어 로직 테스트(모델/앵커/저장왕복/번호/마킹)
 npm run dist       # 윈도우 설치본(NSIS) 빌드
 ```
 
-## 파일 연결 (.md 더블클릭으로 열기)
+## 저장 형식 (데이터 계약)
 
-설치본(`npm run dist`)을 설치하면 `.md`·`.markdown`·`.mdown` 이 Dong Dong MD Viewer 에 등록된다. 탐색기에서 파일 우클릭 → **연결 프로그램** → Dong Dong MD Viewer 를 고르면 바로 렌더된다. 앱이 이미 떠 있으면 새 창 대신 기존 창에서 열린다.
+저장본은 원본 목업 뒤 `</body>` 앞에 다음 블록을 붙인다. 마커·JSON id 는 **불변 계약**이라 바꾸지 않는다(기존 저장본 호환).
 
-> Windows 10/11 은 설치만으로 기본 앱을 강제하지 않는다. 더블클릭 기본 동작까지 바꾸려면 한 번 우클릭 → 연결 프로그램 → Dong Dong MD Viewer → "항상 이 앱으로 열기" 를 선택한다. 기존에 메모장·VS Code·Obsidian 이 `.md` 기본 앱이면 그 설정이 우선한다(OS 정책이라 버그가 아니다).
+```html
+<!-- dd-spec-viewer:begin -->
+<script type="application/json" id="dd-annotations">{ ddVersion, tool, annotations[...] }</script>
+<style id="dd-runtime-style">/* 자기완결 뷰어 CSS */</style>
+<script id="dd-runtime">/* 저장본 렌더 런타임 */</script>
+<!-- dd-spec-viewer:end -->
+```
+
+- `ddVersion` 2 — 사용자 마킹(mark) 도입. v1 저장본은 로드 시 무손실 승격.
+- 불변식 — `extract(embed(pure, ann)) === {pure, ann}`(왕복 항등), `embed(embed(x)) === embed(x)`(멱등).
 
 ## 구조
 
 ```
-src/core/      재활용 코어 (순수 로직, 테스트 대상)
-  routing.js       라우팅 규칙 매처 (Vault.swift RoutingCondition 이식)
-  template.js      템플릿 토큰 치환 (VaultTemplate 이식)
-  frontmatter.js   frontmatter 파서/직렬화 (FrontmatterValue 이식)
-  vault-detect.js  Obsidian 볼트 자동 감지 (윈도우 경로)
-src/main/      Electron 메인 (창·메뉴·파일 열기 IPC)
-src/renderer/  프리뷰 (마크다운 변환 파이프라인 + 테마)
-test/          코어 동작 동일성 테스트
+src/core/      순수 코어 (테스트 대상)
+  anchor.js            요소/좌표 앵커 수학
+  annotation-model.js  주석 모델·검증·마킹(mark)·diff 상태
+  numbering.js         번호 자유관리(seq/label/auto)
+  html-io.js           저장 왕복(embed/strip/extract)
+  vault-detect.js      Obsidian 볼트 자동 감지
+src/main/      Electron 메인 (창·메뉴·파일 IPC)
+src/renderer/  셸 UI + 오버레이 + 저장본 런타임
+test/          코어 동작 테스트
 ```
 
 ## 참고
 
-- 원본 (맥): https://github.com/johnfkoo951/CmdMD
-- 프로젝트 추적 문서 (디디 볼트): `20_Side/031.cmdmd-win/README.md`
+- 원본 셸 (맥 CmdMD): https://github.com/johnfkoo951/CmdMD
+- 프로젝트 추적 문서 (디디 볼트): `20_Side/036.dongdong-spec-markup/ROADMAP.md`

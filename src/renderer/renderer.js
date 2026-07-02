@@ -105,7 +105,7 @@ const SLOT_5DIM = [
 // 문서 없을 때 탭에 표시하는 웰컴.
 const WELCOME_HTML =
 	'<div class="empty">' +
-	'<h2>Dong Dong Spec Viewer for Windows</h2>' +
+	'<h2>Dong Dong Spec Markup for Windows</h2>' +
 	'<p><kbd>Ctrl</kbd>+<kbd>O</kbd> 로 화면기획서 HTML 을, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> 로 폴더를 열면 목업이 그대로 렌더됩니다.</p>' +
 	'<p class="muted">Obsidian 볼트를 쓰신다면 왼쪽 <b>내 Obsidian 볼트</b> 목록에서 바로 열 수 있어요.</p>' +
 	'</div>';
