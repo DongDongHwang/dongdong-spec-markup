@@ -102,6 +102,25 @@ const SLOT_5DIM = [
 	{ key: 'technical', label: '기술' },
 ];
 
+// 6종 설명 슬롯 — 어드민 목업 APP_DATA 의 desc 키(meaning/source/format/values/lifecycle/note)와 1:1.
+// spec-html-admin(어드민 필드 명세)에서 초안이 들어올 때 쓴다. 5종과 키가 완전 분리라 자동 감지 안전.
+const SLOT_6DIM = [
+	{ key: 'meaning', label: '의미' },
+	{ key: 'source', label: '데이터 출처' },
+	{ key: 'format', label: '타입·포맷' },
+	{ key: 'values', label: '가능한 값·집계' },
+	{ key: 'lifecycle', label: '누적·갱신' },
+	{ key: 'note', label: '예외·비고' },
+];
+
+// 슬롯셋 선택 — template('admin-6dim'/'app-5dim') 우선, 없으면 fields 키로 자동 감지(어드민 6키 있으면 6dim).
+function slotSetOf(slots) {
+	if (slots && slots.template === 'admin-6dim') return SLOT_6DIM;
+	if (slots && slots.template === 'app-5dim') return SLOT_5DIM;
+	const f = (slots && slots.fields) || {};
+	return SLOT_6DIM.some((s) => (f[s.key] || '').trim()) ? SLOT_6DIM : SLOT_5DIM;
+}
+
 // 문서 없을 때 탭에 표시하는 웰컴.
 const WELCOME_HTML =
 	'<div class="empty">' +
@@ -962,12 +981,13 @@ function selectedAnnotation() {
 // 초안(draft) 주석을 사람이 편집(설명 수정)하면 '수정'으로 마킹(diff). manual 은 항상 신규라 무관.
 function markEdited(ann) { if (ann && ann.origin === 'draft') ann.edited = true; }
 
-// 슬롯 필드 → body.html/plain 합성 스냅샷 (빈 칸은 건너뜀).
-function composeSlots(fields) {
-	const rows = SLOT_5DIM.filter((s) => (fields[s.key] || '').trim())
+// 슬롯 필드 → body.html/plain 합성 스냅샷 (빈 칸은 건너뜀). slotSet 미지정 시 fields 키로 자동 감지.
+function composeSlots(fields, slotSet) {
+	const set = slotSet || (SLOT_6DIM.some((s) => (fields[s.key] || '').trim()) ? SLOT_6DIM : SLOT_5DIM);
+	const rows = set.filter((s) => (fields[s.key] || '').trim())
 		.map((s) => `<li><b>${s.label}.</b> ${escapeHtml(fields[s.key].trim())}</li>`);
 	const html = rows.length ? `<ul class="dd-slot-body">${rows.join('')}</ul>` : '';
-	const plain = SLOT_5DIM.filter((s) => (fields[s.key] || '').trim())
+	const plain = set.filter((s) => (fields[s.key] || '').trim())
 		.map((s) => `${s.label}. ${fields[s.key].trim()}`).join(' / ');
 	return { html, plain };
 }
@@ -996,8 +1016,9 @@ function renderDetail() {
 // 5종 슬롯 입력 렌더 — 각 칸 편집 시 body 합성 + 더티.
 function renderSlots(ann) {
 	const fields = (ann.slots && ann.slots.fields) || {};
+	const slotSet = slotSetOf(ann.slots);
 	apdSlots.innerHTML = '';
-	for (const s of SLOT_5DIM) {
+	for (const s of slotSet) {
 		const wrap = document.createElement('label');
 		wrap.className = 'apd-slot';
 		const cap = document.createElement('span');
@@ -1014,7 +1035,7 @@ function renderSlots(ann) {
 			if (!cur) return;
 			cur.slots = cur.slots || { template: 'app-5dim', fields: {} };
 			cur.slots.fields[s.key] = ta.value;
-			const c = composeSlots(cur.slots.fields);
+			const c = composeSlots(cur.slots.fields, slotSetOf(cur.slots));
 			cur.body = { format: 'html', html: c.html, plain: c.plain };
 			markEdited(cur); // 초안 슬롯 손대면 '수정'
 			markDirty(tab);
@@ -1139,13 +1160,15 @@ function importDrafts() {
 	let added = 0;
 	for (const { el } of els) {
 		if (existing.has(screenId + '|' + el.id)) continue; // 이미 찍힌 요소는 건너뜀(중복 방지)
+		// desc 키로 슬롯셋 판별 — 어드민 6키(meaning 등) 있으면 admin-6dim, 아니면 app-5dim.
+		const slotSet = (el.desc && SLOT_6DIM.some((s) => el.desc[s.key])) ? SLOT_6DIM : SLOT_5DIM;
 		const fields = {};
-		if (el.desc) for (const s of SLOT_5DIM) if (el.desc[s.key]) fields[s.key] = el.desc[s.key];
-		const c = composeSlots(fields);
+		if (el.desc) for (const s of slotSet) if (el.desc[s.key]) fields[s.key] = el.desc[s.key];
+		const c = composeSlots(fields, slotSet);
 		const a = DDModel.createAnnotation({
 			type: 'pin',
 			anchor: { mode: 'element', elementId: el.id, screenId },
-			slots: Object.keys(fields).length ? { template: 'app-5dim', fields } : null,
+			slots: Object.keys(fields).length ? { template: (slotSet === SLOT_6DIM ? 'admin-6dim' : 'app-5dim'), fields } : null,
 			body: { format: 'html', html: c.html, plain: c.plain || el.name },
 			origin: 'draft', // 초안 주입 — 손대기 전 '기존', 손대면 '수정'
 		});

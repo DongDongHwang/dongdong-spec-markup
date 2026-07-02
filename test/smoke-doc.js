@@ -48,12 +48,38 @@ body{margin:0;font-family:sans-serif}.wf-nav{padding:8px;background:#eee}
 <script>const FIELDS={apply_at:{label:"신청일"},status:{label:"상태"}};</script>
 </body></html>`;
 
+// 새 어드민 목업 (WS-E2) — APP_DATA.screens + data-element-id + desc 6키 + goScreen.
+//   spec-html-admin v4.6 이 발행하는 계약. dd 가 spec-html 급으로 완전 흡수(초안·화면·clean)해야 하고,
+//   6종 설명이 admin-6dim 슬롯 초안으로 들어와야 한다.
+const ADMIN_NEW_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+body{margin:0;font-family:sans-serif}.wf-nav{padding:8px;background:#eee}
+.screen{width:600px;margin:20px auto}.screen:not(.active){display:none}
+th.field-clickable{padding:12px;border:1px solid #bbb}
+</style></head><body>
+<nav class="wf-nav"><a data-goscreen="ADM-001">이벤트 목록</a></nav>
+<div class="screen active" id="screen-ADM-001" data-screen="ADM-001">
+  <table><thead><tr>
+    <th class="field-clickable" data-field="call_type" data-element-id="call_type">호출 유형</th>
+    <th class="field-clickable" data-field="status" data-element-id="status">상태</th>
+  </tr></thead></table>
+</div>
+<script>
+const APP_DATA = { currentScreen:"ADM-001", screens:{ "ADM-001":{ id:"ADM-001", name:"이벤트 목록", type:"admin", areas:[{ elements:[
+  { id:"call_type", field:"call_type", number:"1-1", name:"호출 유형", kind:"신규", desc:{ meaning:"운동 데이터 훅/조회 구분", source:"api_call_log.call_type", format:"ENUM", values:"DATA_HOOK / PULL_QUERY", lifecycle:"발생 시 INSERT", note:"" } },
+  { id:"status", field:"status", number:"1-2", name:"상태", kind:"변경", desc:{ meaning:"처리 상태", source:"api_call_log.status", format:"ENUM", values:"OK / FAIL", lifecycle:"수신 시", note:"" } }
+]}] } } };
+function goScreen(id){ if(!APP_DATA.screens[id]) return; APP_DATA.currentScreen=id; document.querySelectorAll('.screen').forEach(function(s){ s.classList.toggle('active', s.getAttribute('data-screen')===id); }); }
+</script>
+</body></html>`;
+
 const specPath = path.join(TMP, 'spec-like.html');
 const genPath = path.join(TMP, 'generic.html');
 const adminPath = path.join(TMP, 'admin.html');
+const adminNewPath = path.join(TMP, 'admin-new.html');
 fs.writeFileSync(specPath, SPEC_HTML, 'utf8');
 fs.writeFileSync(genPath, GENERIC_HTML, 'utf8');
 fs.writeFileSync(adminPath, ADMIN_HTML, 'utf8');
+fs.writeFileSync(adminNewPath, ADMIN_NEW_HTML, 'utf8');
 
 // headless 안정화 — 무거운 목업 로드 시 네트워크서비스 크래시·hang 방지(메모리 기록).
 const { app, BrowserWindow } = require('electron');
@@ -209,6 +235,38 @@ app.whenReady().then(async () => {
 	check('admin 핀 생성됨', r3.count >= 1, 'count=' + r3.count);
 	check('admin data-field 요소에 element 앵커(WS-F)', r3.mode === 'element', 'mode=' + r3.mode);
 	check('admin 앵커 elementId = data-field 값', r3.elementId === 'apply_at', 'elementId=' + r3.elementId);
+
+	console.log('== WS-E2 새 어드민 목업 (APP_DATA + 6dim + data-element-id) ==');
+	await wc.executeJavaScript(`(async function(){ window.alert=function(){};window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(adminNewPath)}, {history:false}); return true; })()`);
+	await wait(700);
+	const r4 = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		window.toggleEdit();
+		var btn=document.getElementById('ap-import');
+		var importHidden=(!btn||btn.classList.contains('hidden'));
+		if(btn) btn.click();  // 초안 불러오기 (importDrafts)
+		var anns=tab.annotations.annotations;
+		var ws=anns.filter(function(a){return a.slots;});
+		var first=ws[0];
+		return {
+			src:tab.annotations.source.kind,
+			count:anns.length,
+			importHidden:importHidden,
+			template:first&&first.slots.template,
+			hasMeaning:!!(first&&first.slots.fields&&first.slots.fields.meaning),
+			bodyHasMeaning:!!(first&&first.body&&/의미\./.test(first.body.html||'')),
+			clean:tab.frame.contentDocument.body.classList.contains('clean'),
+			elId:first&&first.anchor&&first.anchor.elementId
+		};
+	})()`);
+	check('새 어드민 APP_DATA → spec-html 판정', r4.src === 'spec-html', 'src=' + r4.src);
+	check('새 어드민 초안 버튼 노출(APP_DATA 있음)', r4.importHidden === false);
+	check('초안 흡수 ≥2개', r4.count >= 2, 'count=' + r4.count);
+	check('어드민 초안 = admin-6dim 슬롯', r4.template === 'admin-6dim', 'template=' + r4.template);
+	check('6종 desc 흡수(meaning)', r4.hasMeaning === true);
+	check('body 합성에 6종 라벨(의미.)', r4.bodyHasMeaning === true);
+	check('요소 앵커 = data-element-id 값', r4.elId === 'call_type', 'elId=' + r4.elId);
+	check('새 어드민 clean 자동 적용', r4.clean === true);
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
