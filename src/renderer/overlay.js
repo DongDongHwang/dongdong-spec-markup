@@ -231,29 +231,31 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 
 		// ---- M3 편집 — 찍기·이동·박스·선택·삭제 ------------------------------------
 
-		// 클릭 지점의 목업 요소 — 오버레이 자신은 제외하고 [data-element-id] 조상까지 올린다.
+		// 클릭 지점의 목업 요소 — 스택을 위→아래로 훑어 첫 [data-element-id] 매치를 찾는다.
+		//   spec-html 은 목업 위에 nav-legend 같은 오버레이(data-element-id 없음)를 덮으므로,
+		//   "첫 비오버레이 요소가 data-element-id 가 아니면 포기"하면 그 아래 진짜 요소를 놓친다.
+		//   → 스택 전체를 훑어 실제 앵커 대상이 나올 때까지 계속 본다(못 찾으면 coord 모드).
 		function elementUnderPoint(x, y) {
 			const stack = doc.elementsFromPoint ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
 			for (const el of stack) {
 				if (!el || root.contains(el)) continue;
 				const hit = el.closest ? el.closest('[data-element-id]') : null;
-				return hit || null; // 첫 비오버레이 요소에서 판정 종료 (없으면 coord 모드)
+				if (hit) return hit; // 실제 매치에서만 종료 — 오버레이·비앵커 래퍼는 건너뛴다
 			}
 			return null;
 		}
 
-		// coord 기준 선택 — 대상이 프레임 안이면 frame 비율, 밖이면 body 비율(비율이 -0.5~1.5
-		// 스키마 범위를 벗어나지 않게 — 프레임 왼쪽 여백 클릭 시 x=-0.6 같은 값 방지).
-		function coordBasisFor(absRect) {
+		// coord 기준 선택 — 폰 프레임이 있으면 항상 frame 비율(밖의 여백 핀도 프레임에 매여 함께 이동).
+		//   프레임은 고정폭·가운데 정렬이라 창을 키우면 통째로 재정렬되는데, frame 기준이면 프레임 안이든
+		//   여백이든 모두 프레임을 따라가 상대 위치가 유지된다(비율이 0~1 밖으로 나갈 수 있어 검증 완화).
+		//   body 기준은 창 폭에 비례해 프레임과 어긋나므로 프레임 없는 자유형 목업에서만 쓴다.
+		function coordBasisFor() {
 			const frameEl = basisElement(doc, 'frame');
-			if (frameEl !== doc.body) {
-				const fr = frameEl.getBoundingClientRect();
-				const inside = absRect.left >= fr.left && absRect.top >= fr.top
-					&& absRect.left + (absRect.width || 0) <= fr.right && absRect.top + (absRect.height || 0) <= fr.bottom;
-				if (inside && fr.width > 0) return { basis: 'frame', rect: { left: fr.left, top: fr.top, width: fr.width, height: fr.height } };
-			}
-			const br = doc.body.getBoundingClientRect();
-			return { basis: 'body', rect: { left: br.left, top: br.top, width: br.width, height: br.height } };
+			const r = frameEl.getBoundingClientRect();
+			return {
+				basis: frameEl === doc.body ? 'body' : 'frame',
+				rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+			};
 		}
 
 		// 핀 앵커 자동판정 — 요소 위면 element(따라감), 빈 곳이면 coord(프레임/바디 비율 고정).
@@ -270,7 +272,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 				if (screen) anchor.screenId = screen;
 				return { anchor, coord: null };
 			}
-			const b = coordBasisFor({ left: x, top: y, width: 0, height: 0 });
+			const b = coordBasisFor();
 			const p = DDAnchor.coordFromPoint({ left: x, top: y }, b.rect);
 			const anchor = { mode: 'coord' };
 			if (screen) anchor.screenId = screen;
@@ -297,7 +299,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 					return { anchor, coord: null };
 				}
 			}
-			const b = coordBasisFor(absRect);
+			const b = coordBasisFor();
 			const c = DDAnchor.coordFromRect(absRect, b.rect);
 			const anchor = { mode: 'coord' };
 			if (screen) anchor.screenId = screen;

@@ -52,7 +52,9 @@
 		};
 	}
 
-	function isRatio(n) { return typeof n === 'number' && isFinite(n) && n >= -0.5 && n <= 1.5; } // 비율(경계 살짝 벗어남 허용)
+	function isRatio(n) { return typeof n === 'number' && isFinite(n) && n >= -0.5 && n <= 1.5; } // 요소 내 비율(경계 살짝 벗어남 허용)
+	// coord 위치 비율 — 프레임 여백(밖)에 찍은 핀은 0~1 밖으로 나갈 수 있어 넉넉히 허용(유한값·과도한 이탈만 차단).
+	function isPosRatio(n) { return typeof n === 'number' && isFinite(n) && n >= -5 && n <= 5; }
 
 	// 주석 1건 검증 — 오류 문자열 배열 반환(비면 통과).
 	function validateAnnotation(a, i) {
@@ -74,7 +76,7 @@
 			if (a.anchor.rectPct && !(isRatio(a.anchor.rectPct.x) && isRatio(a.anchor.rectPct.y) && isRatio(a.anchor.rectPct.w) && isRatio(a.anchor.rectPct.h))) errs.push(`${at}.anchor.rectPct: x/y/w/h 비율이어야 함`);
 		} else { // coord
 			const c = a.coord;
-			if (!c || !isRatio(c.x) || !isRatio(c.y)) errs.push(`${at}.coord: coord 모드는 x/y 비율 필수`);
+			if (!c || !isPosRatio(c.x) || !isPosRatio(c.y)) errs.push(`${at}.coord: coord 모드는 x/y 비율 필수`);
 			else if (a.type === 'box' && !(isRatio(c.w) && isRatio(c.h))) errs.push(`${at}.coord: box 는 w/h 비율 필수`);
 		}
 		return errs;
