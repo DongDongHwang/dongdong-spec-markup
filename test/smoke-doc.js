@@ -72,11 +72,25 @@ function goScreen(id){ if(!APP_DATA.screens[id]) return; APP_DATA.currentScreen=
 </script>
 </body></html>`;
 
+// STORY 식 generic 멀티스크린 목업 — APP_DATA·data-element-id 없음. 화면 여러 개가 display 토글로 공존(커스텀 showPage).
+//   불변 원칙 핵심 검증 — spec-html 훅 없이도 "페이지마다 다른 주석"(화면별 게이팅)이 되어야 한다.
+const STORY_MULTI_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+body{margin:0;font-family:sans-serif}.pg{padding:40px}.pg:not(.on){display:none}
+.box{padding:20px;border:1px solid #bbb}
+</style></head><body>
+<div class="pg on" id="pg-0"><div class="box" id="b0">화면0 콘텐츠</div></div>
+<div class="pg" id="pg-1"><div class="box" id="b1">화면1 콘텐츠</div></div>
+<div class="pg" id="pg-2"><div class="box" id="b2">화면2 콘텐츠</div></div>
+<script>function showPage(i){var ps=document.querySelectorAll('.pg');for(var k=0;k<ps.length;k++)ps[k].classList.toggle('on',k===i);}</script>
+</body></html>`;
+
 const specPath = path.join(TMP, 'spec-like.html');
+const storyPath = path.join(TMP, 'story-multi.html');
 const genPath = path.join(TMP, 'generic.html');
 const adminPath = path.join(TMP, 'admin.html');
 const adminNewPath = path.join(TMP, 'admin-new.html');
 fs.writeFileSync(specPath, SPEC_HTML, 'utf8');
+fs.writeFileSync(storyPath, STORY_MULTI_HTML, 'utf8');
 fs.writeFileSync(genPath, GENERIC_HTML, 'utf8');
 fs.writeFileSync(adminPath, ADMIN_HTML, 'utf8');
 fs.writeFileSync(adminNewPath, ADMIN_NEW_HTML, 'utf8');
@@ -267,6 +281,32 @@ app.whenReady().then(async () => {
 	check('body 합성에 6종 라벨(의미.)', r4.bodyHasMeaning === true);
 	check('요소 앵커 = data-element-id 값', r4.elId === 'call_type', 'elId=' + r4.elId);
 	check('새 어드민 clean 자동 적용', r4.clean === true);
+
+	console.log('== generic 멀티스크린 (STORY 식 display 토글·커스텀 전환) ==');
+	await wc.executeJavaScript(`(async function(){ window.alert=function(){};window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(storyPath)}, {history:false}); return true; })()`);
+	await wait(700);
+	const s1 = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); window.toggleEdit();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var el=doc.getElementById('b0'); var r=el.getBoundingClientRect();
+		var cx=Math.round(r.left+r.width/2), cy=Math.round(r.top+r.height/2);
+		doc.dispatchEvent(new win.MouseEvent('mousedown',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:cx,clientY:cy,button:0,bubbles:true}));
+		var a=tab.annotations.annotations[0];
+		return { src:tab.annotations.source.kind, total:tab.annotations.annotations.length, screenSel:a&&a.anchor&&a.anchor.screenSel, visible:tab.overlay.stats().visible };
+	})()`);
+	check('STORY generic 판정', s1.src === 'generic', 'src=' + s1.src);
+	check('화면0 핀 1개 — screenSel = #pg-0 감지', s1.screenSel === '#pg-0', 'screenSel=' + s1.screenSel);
+	check('화면0에서 핀 표시 = 1', s1.visible === 1, 'visible=' + s1.visible);
+	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(1); return true; })()`);
+	await wait(650);
+	const s2 = await wc.executeJavaScript(`(function(){ return { visible:window.activeTab().overlay.stats().visible }; })()`);
+	check('화면1 전환 → 화면0 핀 숨김 = 0 (페이지마다 다른 주석)', s2.visible === 0, 'visible=' + s2.visible);
+	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(0); return true; })()`);
+	await wait(650);
+	const s3 = await wc.executeJavaScript(`(function(){ var tab=window.activeTab(); return { visible:tab.overlay.stats().visible, cur:window.currentScreenId(tab) }; })()`);
+	check('화면0 복귀 → 핀 복원 = 1', s3.visible === 1, 'visible=' + s3.visible);
+	check('generic 현재화면 감지 = #pg-0', s3.cur === '#pg-0', 'cur=' + s3.cur);
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);

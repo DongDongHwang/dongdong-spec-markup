@@ -139,9 +139,40 @@ body.clean #screen-nav { display: none !important; }
 		let editable = !!opts.editable;
 		let selectedId = null;
 		const mock = resolveAppData(win); // spec-html APP_DATA (자유형이면 null)
-		// 현재 화면 ID — screenId 불일치 주석은 렌더 스킵(숨은 트레이 보존).
+		function cssEsc(s) { return (win.CSS && win.CSS.escape) ? win.CSS.escape(s) : String(s).replace(/["\\#.:]/g, '\\$&'); }
+		// generic 목업 화면 감지 — APP_DATA 없이도 "display 토글되는 형제 그룹의 보이는 일원"을 현재 화면으로.
+		//   id 있는 컨테이너만 채택(견고). 못 찾으면 null → 게이팅 off(전부 렌더, 현행 유지). STORY 식 #screen-N 커버.
+		function detectScreenSel(el) {
+			let node = el;
+			while (node && node !== doc.body && node.parentElement) {
+				const parent = node.parentElement;
+				const sibs = Array.prototype.filter.call(parent.children, (c) => c.nodeType === 1 && c.tagName === node.tagName);
+				if (sibs.length >= 2 && node.id) {
+					const anyHidden = sibs.some((c) => c !== node && c.offsetParent === null && c.getClientRects().length === 0);
+					if (anyHidden) return '#' + cssEsc(node.id);
+				}
+				node = parent;
+			}
+			return null;
+		}
+		// 찍을 때 화면 소속 기록 — spec-html 은 screenId(APP_DATA), generic 은 screenSel(DOM 컨테이너).
+		function tagScreen(anchor, screen, px, py) {
+			if (screen) { anchor.screenId = screen; return; }
+			const sel = detectScreenSel(doc.elementFromPoint(px, py));
+			if (sel) anchor.screenSel = sel;
+		}
+		// generic 현재 화면 — 주석들의 screenSel 중 지금 보이는 것(문서 뷰 재렌더·onScreenChange 용).
+		function genScreen() {
+			for (const a of annotations()) {
+				const sel = a.anchor && a.anchor.screenSel;
+				if (sel) { const e = doc.querySelector(sel); if (isRenderable(e)) return sel; }
+			}
+			return null;
+		}
+		// 현재 화면 ID — screenId/screenSel 불일치 주석은 렌더 스킵(숨은 트레이 보존).
 		function currentScreen() {
-			try { return (mock && mock.currentScreen) || null; } catch (_) { return null; }
+			if (mock) { try { return mock.currentScreen || null; } catch (_) { return null; } }
+			return genScreen();
 		}
 
 		// 스타일 + 루트 + 트레이 주입 (형제 append — 목업 노드 무변형)
@@ -266,8 +297,11 @@ body.clean #screen-nav { display: none !important; }
 				if (!node) continue;
 				if (a.id === dragNodeId) { visible++; continue; } // 드래그 중 — 손이 위치 소유
 				let abs = null; // { left, top, width?, height? } — viewport 좌표
-				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) {
-					abs = null; // 다른 화면 소속(element·coord 공통) — 렌더 스킵
+				let gated = false;
+				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true; // spec-html 다른 화면
+				else if (a.anchor && a.anchor.screenSel && !isRenderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic — 소속 화면 컨테이너가 지금 안 보임
+				if (gated) {
+					abs = null; // 다른 화면 소속(element·coord·generic 공통) — 렌더 스킵
 				} else if (a.anchor && a.anchor.mode === 'element') {
 					const target = queryElement(doc, a.anchor.elementId);
 					if (isRenderable(target)) {
@@ -356,13 +390,13 @@ body.clean #screen-nav { display: none !important; }
 					elementId: elementIdOf(el),
 					offsetPct: DDAnchor.offsetPctFromPoint({ left: x, top: y }, { left: r.left, top: r.top, width: r.width, height: r.height }),
 				};
-				if (screen) anchor.screenId = screen;
+				tagScreen(anchor, screen, x, y);
 				return { anchor, coord: null };
 			}
 			const b = coordBasisFor();
 			const p = DDAnchor.coordFromPoint({ left: x, top: y }, b.rect);
 			const anchor = { mode: 'coord' };
-			if (screen) anchor.screenId = screen;
+			tagScreen(anchor, screen, x, y);
 			return { anchor, coord: { basis: b.basis, x: p.x, y: p.y } };
 		}
 
@@ -382,14 +416,14 @@ body.clean #screen-nav { display: none !important; }
 						elementId: elementIdOf(el),
 						rectPct: DDAnchor.coordFromRect(absRect, { left: r.left, top: r.top, width: r.width, height: r.height }),
 					};
-					if (screen) anchor.screenId = screen;
+					tagScreen(anchor, screen, cx, cy);
 					return { anchor, coord: null };
 				}
 			}
 			const b = coordBasisFor();
 			const c = DDAnchor.coordFromRect(absRect, b.rect);
 			const anchor = { mode: 'coord' };
-			if (screen) anchor.screenId = screen;
+			tagScreen(anchor, screen, cx, cy);
 			return { anchor, coord: Object.assign({ basis: b.basis }, c) };
 		}
 
@@ -607,6 +641,7 @@ body.clean #screen-nav { display: none !important; }
 		return {
 			relayout: layout,
 			stats: () => lastStats,
+			currentScreen,      // spec-html screenId 또는 generic screenSel(문서 뷰·편집 필터용)
 			select,
 			getSelected: () => selectedId,
 			getSelectedClone,   // 복사용 deep clone

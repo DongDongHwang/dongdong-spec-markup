@@ -124,7 +124,9 @@ body.dd-docview #description { display: none !important; }
 			return r.width > 0 || r.height > 0;
 		}
 		function curScreen() {
-			try { return (typeof APP_DATA !== 'undefined' && APP_DATA) ? (APP_DATA.currentScreen || null) : null; } catch (e) { return null; }
+			try { if (typeof APP_DATA !== 'undefined' && APP_DATA) return APP_DATA.currentScreen || null; } catch (e) {}
+			for (var i = 0; i < anns.length; i++) { var s = anns[i].anchor && anns[i].anchor.screenSel; if (s) { var e = doc.querySelector(s); if (renderable(e)) return s; } } // generic 폴백
+			return null;
 		}
 
 		// ---- 오버레이 DOM ----
@@ -198,7 +200,13 @@ body.dd-docview #description { display: none !important; }
 			if (!docMode) return sa;
 			var cur = curScreen();
 			if (!cur) return sa;
-			return sa.filter(function (a) { var sid = a.anchor && a.anchor.screenId; return !sid || sid === cur; });
+			return sa.filter(function (a) {
+				var sid = a.anchor && a.anchor.screenId;
+				if (sid) return sid === cur;
+				var ssel = a.anchor && a.anchor.screenSel;
+				if (ssel) return renderable(doc.querySelector(ssel)); // generic — 지금 보이는 화면 핀만
+				return true; // 화면 무관 좌표핀
+			});
 		}
 		function renderList() {
 			list.innerHTML = ''; rows = {};
@@ -247,7 +255,10 @@ body.dd-docview #description { display: none !important; }
 				var a = anns[i], node = nodes[a.id];
 				if (!node) continue;
 				var abs = null;
-				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) {
+				var gated = false;
+				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true;
+				else if (a.anchor && a.anchor.screenSel && !renderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic 화면 컨테이너 숨김
+				if (gated) {
 					abs = null;
 				} else if (a.anchor && a.anchor.mode === 'element') {
 					var target = queryEl(a.anchor.elementId);

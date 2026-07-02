@@ -902,10 +902,10 @@ function highlightAnnotRow(id) {
 }
 
 // ---- 문서 뷰 (M5.5) — 현재 화면 소속 핀을 seq 순 번호·설명 표로 상시 노출(읽기 전용) --------
-// 현재 화면 ID — spec-html APP_DATA.currentScreen(realm eval). generic·화면개념 없으면 null.
+// 현재 화면 ID — spec-html APP_DATA.currentScreen, generic 은 오버레이가 감지한 screenSel. 화면개념 없으면 null.
 function currentScreenId(tab) {
-	try { const app = DDOverlay.readAppData(tab.frame); return app ? (app.currentScreen || null) : null; }
-	catch (_) { return null; }
+	try { const app = DDOverlay.readAppData(tab.frame); if (app) return app.currentScreen || null; } catch (_) {}
+	try { return (tab.overlay && tab.overlay.currentScreen && tab.overlay.currentScreen()) || null; } catch (_) { return null; }
 }
 // 문서 뷰에 실을 주석 — 현재 화면 소속 + 화면 무관 좌표핀만. 화면 개념 없으면(generic) 전부.
 function docAnnotationsFor(tab) {
@@ -914,7 +914,13 @@ function docAnnotationsFor(tab) {
 	const anns = DDNumbering.sortedBySeq(set);
 	const cur = currentScreenId(tab);
 	if (!cur) return anns;
-	return anns.filter((a) => { const sid = a.anchor && a.anchor.screenId; return !sid || sid === cur; });
+	return anns.filter((a) => {
+		const sid = a.anchor && a.anchor.screenId;
+		if (sid) return sid === cur;
+		const ssel = a.anchor && a.anchor.screenSel;
+		if (ssel) return ssel === cur; // generic — cur 는 현재 보이는 screenSel
+		return true; // 화면 무관 좌표핀
+	});
 }
 // 설명 body → 렌더 HTML. html 우선, plain 폴백, 둘 다 없으면 '설명 없음'.
 function docBodyHtml(a) {
