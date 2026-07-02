@@ -34,6 +34,12 @@ const DDOverlay = (() => {
 	font: 700 10px/1 Pretendard, -apple-system, sans-serif; pointer-events: auto; user-select: none;
 }
 #${ROOT_ID} .dd-selected { outline: 3px solid rgba(116,96,217,.45); outline-offset: 2px; }
+#${ROOT_ID} .dd-pin.dd-st-new { background: #18a558; }
+#${ROOT_ID} .dd-pin.dd-st-modified { background: #e08600; }
+#${ROOT_ID} .dd-box.dd-st-new { border-color: #18a558; }
+#${ROOT_ID} .dd-box.dd-st-modified { border-color: #e08600; }
+#${ROOT_ID} .dd-box.dd-st-new .dd-box-label { background: #18a558; }
+#${ROOT_ID} .dd-box.dd-st-modified .dd-box-label { background: #e08600; }
 #${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
 #${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
@@ -161,7 +167,9 @@ body.clean #screen-nav { display: none !important; }
 				el.textContent = a.label;
 			}
 			el.dataset.ddId = a.id;
-			if (a.style && a.style.color) {
+			const st = DDModel.annotStatus(a); // diff(M6) — new(초록)/modified(주황)/unchanged(기본 색)
+			el.classList.add('dd-st-' + st);
+			if (st === 'unchanged' && a.style && a.style.color) {
 				if (a.type === 'box') el.style.borderColor = a.style.color;
 				else el.style.background = a.style.color;
 			}

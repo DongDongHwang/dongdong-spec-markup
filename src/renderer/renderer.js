@@ -626,6 +626,16 @@ let dragAnnotId = null; // 행 드래그 재정렬 중인 주석 id
 
 function annotTypeIcon(a) { return a.type === 'box' ? '▭' : '📍'; }
 
+// diff 배지 — 신규(manual 직접)/수정(draft 편집됨). 기존(draft 미편집)은 배지 없음. 목록·문서 뷰 공용.
+function statusBadgeEl(a) {
+	const st = DDModel.annotStatus(a);
+	if (st !== 'new' && st !== 'modified') return null;
+	const b = document.createElement('span');
+	b.className = 'st-badge st-' + st;
+	b.textContent = st === 'new' ? '신규' : '수정';
+	return b;
+}
+
 function renderAnnotPanel() {
 	if (!annotPanel) return;
 	const tab = activeTab();
@@ -676,7 +686,10 @@ function renderAnnotPanel() {
 		rm.type = 'button';
 		rm.textContent = '×';
 		rm.title = '삭제 (Delete)';
-		li.append(label, type, text, auto, rm);
+		const badge = statusBadgeEl(a);
+		li.append(label, type, text);
+		if (badge) li.appendChild(badge);
+		li.append(auto, rm);
 		// 선택 동기화 — 행 클릭 → 오버레이 핀 하이라이트
 		li.addEventListener('click', (e) => {
 			if (e.target === rm || e.target === auto) return;
@@ -801,7 +814,10 @@ function renderDocPanel(tab) {
 		const body = document.createElement('div');
 		body.className = 'doc-body';
 		body.innerHTML = docBodyHtml(a);
-		li.append(num, body);
+		const badge = statusBadgeEl(a);
+		li.append(num);
+		if (badge) li.appendChild(badge);
+		li.append(body);
 		li.addEventListener('click', () => { if (tab.overlay) tab.overlay.select(a.id); highlightDocRow(a.id); });
 		annotList.appendChild(li);
 	}
@@ -869,6 +885,9 @@ function selectedAnnotation() {
 	return { tab, ann };
 }
 
+// 초안(draft) 주석을 사람이 편집(설명 수정)하면 '수정'으로 마킹(diff). manual 은 항상 신규라 무관.
+function markEdited(ann) { if (ann && ann.origin === 'draft') ann.edited = true; }
+
 // 슬롯 필드 → body.html/plain 합성 스냅샷 (빈 칸은 건너뜀).
 function composeSlots(fields) {
 	const rows = SLOT_5DIM.filter((s) => (fields[s.key] || '').trim())
@@ -922,6 +941,7 @@ function renderSlots(ann) {
 			cur.slots.fields[s.key] = ta.value;
 			const c = composeSlots(cur.slots.fields);
 			cur.body = { format: 'html', html: c.html, plain: c.plain };
+			markEdited(cur); // 초안 슬롯 손대면 '수정'
 			markDirty(tab);
 			updateRowText(cur);
 		});
@@ -946,6 +966,7 @@ if (apdEditor) {
 		if (!ann || apdSlotMode) return;
 		ann.body = { format: 'html', html: apdEditor.innerHTML, plain: apdEditor.textContent || '' };
 		ann.slots = null; // 자유 텍스트로 쓰면 슬롯 스냅샷 폐기(SSOT=자유 텍스트)
+		markEdited(ann); // 초안 손대면 '수정'
 		markDirty(tab);
 		updateRowText(ann);
 	});
@@ -1008,6 +1029,7 @@ function importDrafts() {
 			anchor: { mode: 'element', elementId: el.id, screenId },
 			slots: Object.keys(fields).length ? { template: 'app-5dim', fields } : null,
 			body: { format: 'html', html: c.html, plain: c.plain || el.name },
+			origin: 'draft', // 초안 주입 — 손대기 전 '기존', 손대면 '수정'
 		});
 		DDNumbering.add(tab.annotations, a);
 		added++;

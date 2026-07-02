@@ -601,3 +601,8 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 	display: inline-flex; align-items: center; justify-content: center;
 	background: #7460D9; color: #fff; font-size: 10px; font-weight: 700; border-radius: 999px;
 }
+
+/* ---- diff 배지 (M6) — 신규/수정. 기존은 배지 없음. 목록·문서 뷰 공용 ---- */
+.st-badge { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; white-space: nowrap; }
+.st-badge.st-new { background: color-mix(in srgb, #18a558 18%, var(--bg)); color: #18a558; }
+.st-badge.st-modified { background: color-mix(in srgb, #e08600 22%, var(--bg)); color: #c26f00; }

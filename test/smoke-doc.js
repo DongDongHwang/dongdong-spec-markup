@@ -91,7 +91,8 @@ const SPEC_SCENARIO = `(function(){
 		firstBodyHasHtml:!!document.querySelector('#annot-list .doc-row .doc-body b'),
 		curScreen:window.currentScreenId(tab),
 		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean'),
-		docviewApplied:tab.frame.contentDocument.body.classList.contains('dd-docview')
+		docviewApplied:tab.frame.contentDocument.body.classList.contains('dd-docview'),
+		newBadges:document.querySelectorAll('#annot-list .st-badge.st-new').length
 	};
 })()`;
 
@@ -133,6 +134,7 @@ app.whenReady().then(async () => {
 	check('설명 body 리치텍스트(html) 렌더', r1.firstBodyHasHtml === true);
 	check('spec-html 목업 clean 자동 적용(목업 자체 주석 끔)', r1.cleanApplied === true);
 	check('문서 뷰 → iframe body.dd-docview(#description 숨김)', r1.docviewApplied === true);
+	check('diff — 직접 찍은 핀 신규 배지(S1 2개)', r1.newBadges === 2, 'newBadges=' + r1.newBadges);
 
 	await wc.executeJavaScript(SWITCH_SCENARIO);
 	await wait(650); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)

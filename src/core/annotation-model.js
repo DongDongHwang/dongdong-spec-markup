@@ -49,7 +49,16 @@
 			style: p.style || { variant: 'solid', color: '#7460D9' },
 			body: p.body || { format: 'html', html: '', plain: '' },
 			slots: p.slots || null,
+			origin: p.origin === 'draft' ? 'draft' : 'manual', // M6 diff — draft(초안 주입) | manual(직접 생성=신규)
+			edited: !!p.edited,                                 // draft 를 사람이 손대면 true → '수정'
 		};
+	}
+
+	// diff 상태 — manual(직접 찍음)=신규 / draft 편집됨=수정 / draft 그대로=기존. 목록·핀·저장본 배지에 공용.
+	//   origin 없는 옛 저장본은 manual 취급(신규) — 하위호환(과거엔 diff 개념 없음).
+	function annotStatus(a) {
+		if (!a || a.origin !== 'draft') return 'new';
+		return a.edited ? 'modified' : 'unchanged';
 	}
 
 	function isRatio(n) { return typeof n === 'number' && isFinite(n) && n >= -0.5 && n <= 1.5; } // 요소 내 비율(경계 살짝 벗어남 허용)
@@ -101,5 +110,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, genId, createSet, createAnnotation, validateAnnotation, validateSet };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, genId, createSet, createAnnotation, validateAnnotation, validateSet, annotStatus };
 });

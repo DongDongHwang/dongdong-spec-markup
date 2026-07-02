@@ -31,6 +31,14 @@
 	font: 700 10px/1 Pretendard, -apple-system, sans-serif; pointer-events: auto; user-select: none;
 }
 #dd-overlay-root .dd-pin.dd-active, #dd-overlay-root .dd-box.dd-active { outline: 3px solid rgba(116,96,217,.5); outline-offset: 2px; }
+#dd-overlay-root .dd-pin.dd-st-new { background: #18a558; }
+#dd-overlay-root .dd-pin.dd-st-modified { background: #e08600; }
+#dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
+#dd-overlay-root .dd-box.dd-st-modified { border-color: #e08600; }
+#dd-overlay-root .dd-box.dd-st-new .dd-box-label, #dd-overlay-root .dd-box.dd-st-modified .dd-box-label { background: inherit; }
+#dd-panel .dd-p-badge { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; margin-right: 4px; align-self: flex-start; }
+#dd-panel .dd-p-badge.dd-b-new { background: rgba(24,165,88,.15); color: #18a558; }
+#dd-panel .dd-p-badge.dd-b-modified { background: rgba(224,134,0,.2); color: #c26f00; }
 #dd-panel {
 	position: fixed; right: 14px; top: 14px; bottom: 14px; width: 300px; z-index: 99992;
 	display: flex; flex-direction: column; background: #fff; color: #1f2328;
@@ -67,6 +75,8 @@ body.dd-docview #description { display: none !important; }
 		var anns = set.annotations;
 		// spec-html 목업이면 자체 주석(area-rail·el-pin·매핑) 끄기 — dd 핀과 겹침 방지(dd 앱 clean 과 동일). 목업 좌하단 토글로 되돌릴 수 있다.
 		try { if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) doc.body.classList.add('clean'); } catch (e) {}
+		// diff 상태(M6) — manual/옛 저장본=신규 / draft 편집됨=수정 / draft 그대로=기존. dd 앱 annotStatus 판박이.
+		function annStatus(a) { if (!a || a.origin !== 'draft') return 'new'; return a.edited ? 'modified' : 'unchanged'; }
 
 		// ---- 앵커 math (anchor.js 인라인) ----
 		function pinPoint(rect, off) {
@@ -124,7 +134,8 @@ body.dd-docview #description { display: none !important; }
 					el = doc.createElement('div'); el.className = 'dd-pin'; el.textContent = a.label;
 				}
 				el.setAttribute('data-dd-id', a.id);
-				if (a.style && a.style.color) { if (a.type === 'box') el.style.borderColor = a.style.color; else el.style.background = a.style.color; }
+				var pst = annStatus(a); el.className += ' dd-st-' + pst;
+				if (pst === 'unchanged' && a.style && a.style.color) { if (a.type === 'box') el.style.borderColor = a.style.color; else el.style.background = a.style.color; }
 				el.style.display = 'none';
 				el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
 				root.appendChild(el);
@@ -169,7 +180,8 @@ body.dd-docview #description { display: none !important; }
 			for (var j = 0; j < sa.length; j++) {
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
-					li.innerHTML = '<span class="dd-p-num">' + a.label + '</span><div class="dd-p-body">' + slotHtml(a) + '</div>';
+					var lst = annStatus(a), lbadge = (lst === 'new' || lst === 'modified') ? '<span class="dd-p-badge dd-b-' + lst + '">' + (lst === 'new' ? '신규' : '수정') + '</span>' : '';
+					li.innerHTML = '<span class="dd-p-num">' + a.label + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + '</div>';
 					li.addEventListener('click', function () { selectAnn(a.id); });
 					list.appendChild(li); rows[a.id] = li;
 				})(sa[j]);

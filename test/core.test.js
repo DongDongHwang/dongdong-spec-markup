@@ -67,6 +67,18 @@ test('model: 오류 검출 — elementId 누락·coord 박스 w/h 누락·id 중
 	assert.ok(v.errors.some((e) => e.includes('중복')));
 });
 
+test('model: origin/edited + annotStatus (diff)', () => {
+	const m = DDModel.createAnnotation({ anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } });
+	assert.strictEqual(m.origin, 'manual');
+	assert.strictEqual(m.edited, false);
+	assert.strictEqual(DDModel.annotStatus(m), 'new'); // manual(직접) = 신규
+	const d = DDModel.createAnnotation({ origin: 'draft', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } });
+	assert.strictEqual(DDModel.annotStatus(d), 'unchanged'); // 초안 미편집 = 기존
+	d.edited = true;
+	assert.strictEqual(DDModel.annotStatus(d), 'modified'); // 초안 편집 = 수정
+	assert.strictEqual(DDModel.annotStatus({}), 'new'); // origin 없는 옛 저장본 = 신규(하위호환)
+});
+
 // ---- anchor ----------------------------------------------------------------
 
 const RECT = { left: 100, top: 200, width: 300, height: 60 }; // 요소/기준 렉트 예시

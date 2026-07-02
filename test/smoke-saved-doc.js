@@ -72,7 +72,8 @@ app.whenReady().then(async () => {
 			docModeClass:document.body.classList.contains('dd-doc-mode'), btnText:docBtn.textContent,
 			bodyHtml:!!document.querySelector('#dd-panel .dd-p-row .dd-p-body b'),
 			cleanApplied:document.body.classList.contains('clean'),
-			docviewApplied:document.body.classList.contains('dd-docview')
+			docviewApplied:document.body.classList.contains('dd-docview'),
+			newBadges:document.querySelectorAll('#dd-panel .dd-p-badge.dd-b-new').length
 		};
 	})()`);
 	check('저장본 우측 패널 자체 렌더(dd 없이)', r.hasPanel === true);
@@ -82,6 +83,7 @@ app.whenReady().then(async () => {
 	check('문서 뷰 = 현재 화면(S1) 2행', r.rowsDoc === 2, 'rowsDoc=' + r.rowsDoc);
 	check('버튼 텍스트 전환(전체 보기)', r.btnText === '전체 보기');
 	check('설명 리치텍스트(html) 렌더', r.bodyHtml === true);
+	check('diff — 신규 배지(S1 2개, 직접 생성 manual)', r.newBadges === 2, 'newBadges=' + r.newBadges);
 	check('저장본 clean 자동 적용(dd 없이도 목업 자체 주석 끔)', r.cleanApplied === true);
 	check('문서 뷰 → body.dd-docview(#description 숨김)', r.docviewApplied === true);
 
