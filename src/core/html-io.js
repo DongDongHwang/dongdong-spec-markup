@@ -21,17 +21,22 @@
 	}
 
 	// dd 블록 조립 — 마커로 감싼 형제 노드들. 원본과 항상 개행으로 분리.
-	function buildBlock(set) {
-		return BEGIN + '\n'
-			+ '<script type="application/json" id="' + JSON_ID + '">' + serializeSet(set) + '</script>\n'
-			+ END;
+	//   runtime({css,js}) 주면 브라우저 자기완결 뷰어(style+script)까지 같은 마커 안에 인라인.
+	//   런타임 JS 안의 '</script>' 리터럴은 태그 조기 종료를 막기 위해 '<\/script>' 로 이스케이프.
+	function buildBlock(set, runtime) {
+		let s = BEGIN + '\n'
+			+ '<script type="application/json" id="' + JSON_ID + '">' + serializeSet(set) + '</script>\n';
+		if (runtime && runtime.css) s += '<style id="dd-runtime-style">' + String(runtime.css).replace(/<\/(style)>/gi, '<\\/$1>') + '</style>\n';
+		if (runtime && runtime.js) s += '<script id="dd-runtime">' + String(runtime.js).replace(/<\/(script)>/gi, '<\\/$1>') + '</script>\n';
+		return s + END;
 	}
 
 	// 주석 세트를 원본 HTML 에 심는다 — 기존 dd 블록이 있으면 제거 후 새로 1세트(멱등).
 	//   삽입 지점 = 마지막 </body> 앞(대소문자 무관). 없으면 문서 끝에 append.
-	function embed(html, set) {
+	//   runtime 선택 인자 = 브라우저 자기완결 뷰어(M5b). 없으면 JSON 블록만(M5a 동작·기존 테스트 호환).
+	function embed(html, set, runtime) {
 		const pure = strip(html);
-		const block = buildBlock(set);
+		const block = buildBlock(set, runtime);
 		const m = pure.match(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i); // 마지막 </body>
 		if (!m) return pure + (pure.endsWith('\n') ? '' : '\n') + block + '\n'; // 개행 중복 방지(멱등 유지)
 		const at = m.index;

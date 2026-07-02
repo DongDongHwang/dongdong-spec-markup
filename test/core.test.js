@@ -152,6 +152,28 @@ test('html-io: dd 블록 없는 일반 목업 — set=null, pure 그대로', () 
 	assert.strictEqual(out.set, null);
 });
 
+test('html-io: 런타임 인라인(M5b) — 왕복·멱등·원본 무손상 유지', () => {
+	const rt = { css: '.dd-x{color:red}', js: 'console.log("dd runtime");' };
+	const set = sampleSet();
+	const embedded = DDHtmlIO.embed(PURE, set, rt);
+	assert.ok(embedded.includes('dd-runtime-style'), '런타임 style 블록 포함');
+	assert.ok(embedded.includes('id="dd-runtime"'), '런타임 script 블록 포함');
+	const out = DDHtmlIO.extract(embedded);
+	assert.strictEqual(out.pure, PURE); // 런타임 심어도 원본 무손상(strip 이 전부 걷어냄)
+	assert.deepStrictEqual(out.set, set); // JSON 만 파싱 복원
+	assert.strictEqual(DDHtmlIO.embed(embedded, set, rt), embedded); // 멱등
+});
+
+test('html-io: 런타임 JS 의 </script> 리터럴 이스케이프 — 태그 조기종료 방지', () => {
+	const rt = { css: 'x{}', js: 'var s="</scr'+'ipt>";' };
+	const embedded = DDHtmlIO.embed(PURE, sampleSet(), rt);
+	// dd-runtime 스크립트 블록 안에 리터럴 </script> 가 없어야(이스케이프됨) 태그가 안 깨진다
+	const m = embedded.match(/<script id="dd-runtime">([\s\S]*?)<\/script>/);
+	assert.ok(m, 'dd-runtime 블록이 온전히 닫힘');
+	assert.ok(!m[1].includes('</scr' + 'ipt>'), '내부 리터럴 이스케이프됨');
+	assert.strictEqual(DDHtmlIO.extract(embedded).pure, PURE); // 무손상 유지
+});
+
 // ---- numbering -------------------------------------------------------------
 
 function numSet(n) {

@@ -237,7 +237,9 @@ async function saveTab(asNew) {
 	const hasAnn = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
 	if (set) set.savedAt = new Date().toISOString();
 	// tab.raw(원본, dd 블록 포함 가능) 기준으로 embed — embed 가 기존 블록 strip 후 1세트만 남긴다(멱등·무손상).
-	const html = hasAnn ? window.DDHtmlIO.embed(tab.raw, set) : window.DDHtmlIO.strip(tab.raw);
+	//   runtime 인라인(M5b) — 저장본을 dd 없이 브라우저로 열어도 핀·설명이 뜨게 자기완결 뷰어를 심는다.
+	const runtime = (window.DDRuntimeSrc && { css: window.DDRuntimeSrc.RUNTIME_CSS, js: window.DDRuntimeSrc.RUNTIME_JS }) || null;
+	const html = hasAnn ? window.DDHtmlIO.embed(tab.raw, set, runtime) : window.DDHtmlIO.strip(tab.raw);
 	let res;
 	if (asNew) res = await window.ddsv.saveAnnotatedAs(tab.docPath, html);
 	else res = await window.ddsv.saveAnnotated(tab.docPath, html);
