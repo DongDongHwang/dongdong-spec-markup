@@ -169,6 +169,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 		}
 
 		let lastStats = { visible: 0, hidden: 0 };
+		let lastScreen; // 직전 layout 의 현재 화면 — 바뀌면 onScreenChange 통지(문서 뷰 우측 표 갱신용)
 		let dragNodeId = null; // 드래그 중 노드 — layout 이 위치를 되돌리지 않게 스킵
 
 		// 재정렬 본체 — 요소/기준 rect 를 매번 다시 읽고 root 기준 상대 px 로 배치.
@@ -177,6 +178,7 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 			if (!doc.body || !doc.getElementById(ROOT_ID)) return;
 			const rootRect = root.getBoundingClientRect();
 			const screen = currentScreen();
+			if (screen !== lastScreen) { lastScreen = screen; if (opts.onScreenChange) opts.onScreenChange(screen); }
 			const hiddenLabels = [];
 			let visible = 0;
 			for (const a of annotations()) {

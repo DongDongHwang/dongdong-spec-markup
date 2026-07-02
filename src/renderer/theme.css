@@ -557,3 +557,37 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 .annot-panel { min-width: 0; overflow: hidden; }
 .annot-list, .annot-row, .apd-slots, .ap-detail { min-width: 0; }
 .annot-text { min-width: 0; } /* flex 자식 ellipsis 가 실제로 작동하려면 필수 */
+
+/* ---- 문서 뷰 (M5.5) — 읽기 전용 번호·설명 표(1세대 기획서 Description 표) ---- */
+#layout.doc-mode .annot-panel { flex-basis: var(--ap-width, 380px); } /* 문서 뷰 표는 편집 패널보다 넓게 */
+/* 문서 모드 = 읽기 — 편집 컨트롤(초안·당김·설명 편집기·힌트) 전부 숨김. 접기 버튼(ap-collapse)만 남긴다 */
+.annot-panel.doc-mode .ap-import,
+.annot-panel.doc-mode .ap-pull,
+.annot-panel.doc-mode .ap-hint,
+.annot-panel.doc-mode .ap-detail { display: none; }
+.doc-row {
+	display: flex; gap: 10px; padding: 10px 10px; border-bottom: 1px solid var(--border);
+	align-items: flex-start; cursor: pointer;
+}
+.doc-row:hover { background: color-mix(in srgb, #7460D9 8%, transparent); }
+.doc-row.is-active { background: color-mix(in srgb, #7460D9 14%, transparent); }
+.doc-num {
+	flex: 0 0 auto; min-width: 22px; height: 20px; padding: 0 6px; box-sizing: border-box;
+	display: inline-flex; align-items: center; justify-content: center;
+	background: #7460D9; color: #fff; font-weight: 700; font-size: 11px; border-radius: 999px;
+}
+.doc-body { flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.55; color: var(--fg); word-break: break-word; }
+.doc-body p { margin: 2px 0; }
+.doc-body ul { margin: 2px 0; padding-left: 16px; }
+.doc-body .doc-empty { color: var(--muted); }
+
+/* 인쇄 — 문서 뷰를 종이에. 셸 크롬 숨기고 목업+표만. (완전한 PDF 는 저장본을 브라우저에서 인쇄 권장) */
+@media print {
+	#topbar, #sidebar, .ap-gutter, .tabstrip, .ap-reopen, #toast, #drop-overlay { display: none !important; }
+	.annot-panel.doc-mode .ap-head-actions { display: none !important; }
+	#layout { display: block; height: auto; }
+	#panes { display: block; }
+	.annot-panel { flex: none !important; width: 100% !important; overflow: visible; }
+	.annot-list { overflow: visible; }
+	.doc-row { break-inside: avoid; }
+}

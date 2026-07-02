@@ -39,7 +39,9 @@
 }
 #dd-panel .dd-p-head { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
 #dd-panel .dd-p-head b { color: #7460D9; }
+#dd-panel .dd-p-btns { display: inline-flex; gap: 6px; }
 #dd-panel .dd-p-toggle { border: 1px solid #e5e7eb; background: #fff; border-radius: 5px; font-size: 11px; padding: 2px 7px; cursor: pointer; color: #6b7280; }
+#dd-panel .dd-p-toggle.dd-on { border-color: #7460D9; color: #7460D9; background: rgba(116,96,217,.08); }
 #dd-panel .dd-p-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1 1 auto; }
 #dd-panel .dd-p-row { display: flex; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; align-items: flex-start; }
 #dd-panel .dd-p-row:hover { background: rgba(116,96,217,.08); }
@@ -128,29 +130,57 @@
 		}
 
 		// ---- 우측 패널 (읽기전용 목록 + 설명) ----
+		//   문서 뷰 토글 — 켜면 현재 화면 소속 핀만 표로(1세대 기획서 Description 표, 인쇄/PDF 대응),
+		//   끄면 전체 목록(인터랙티브). 화면 전환 시 layout 이 감지해 문서 뷰 목록을 재렌더한다.
 		var panel = doc.createElement('div');
 		panel.id = 'dd-panel';
 		var head = doc.createElement('div'); head.className = 'dd-p-head';
-		head.innerHTML = '<span>주석 <b>' + anns.length + '</b></span>';
+		var headTitle = doc.createElement('span'); head.appendChild(headTitle);
+		var headBtns = doc.createElement('span'); headBtns.className = 'dd-p-btns';
+		var docBtn = doc.createElement('button'); docBtn.className = 'dd-p-toggle'; docBtn.textContent = '문서 뷰';
+		docBtn.title = '현재 화면 소속 핀만 표로 (인쇄/PDF 대응)';
 		var toggle = doc.createElement('button'); toggle.className = 'dd-p-toggle'; toggle.textContent = '접기';
+		headBtns.appendChild(docBtn); headBtns.appendChild(toggle);
+		head.appendChild(headBtns);
 		toggle.addEventListener('click', function () {
 			var c = panel.classList.toggle('dd-collapsed'); toggle.textContent = c ? '펼치기' : '접기';
 		});
-		head.appendChild(toggle);
 		var list = doc.createElement('ul'); list.className = 'dd-p-list';
 		panel.appendChild(head); panel.appendChild(list);
 		doc.body.appendChild(panel);
 		var rows = {};
+		var docMode = false;
 		function sortedAnns() { return anns.slice().sort(function (a, b) { return (a.seq || 0) - (b.seq || 0); }); }
-		var sa = sortedAnns();
-		for (var j = 0; j < sa.length; j++) {
-			(function (a) {
-				var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
-				li.innerHTML = '<span class="dd-p-num">' + a.label + '</span><div class="dd-p-body">' + slotHtml(a) + '</div>';
-				li.addEventListener('click', function () { selectAnn(a.id); });
-				list.appendChild(li); rows[a.id] = li;
-			})(sa[j]);
+		// 문서 뷰 = 현재 화면 소속 + 화면 무관 좌표핀만. 화면 개념 없으면(generic) 전부. 인터랙티브면 전부.
+		function visibleAnns() {
+			var sa = sortedAnns();
+			if (!docMode) return sa;
+			var cur = curScreen();
+			if (!cur) return sa;
+			return sa.filter(function (a) { var sid = a.anchor && a.anchor.screenId; return !sid || sid === cur; });
 		}
+		function renderList() {
+			list.innerHTML = ''; rows = {};
+			var sa = visibleAnns();
+			headTitle.innerHTML = (docMode ? '문서 뷰 ' : '주석 ') + '<b>' + sa.length + '</b>';
+			for (var j = 0; j < sa.length; j++) {
+				(function (a) {
+					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
+					li.innerHTML = '<span class="dd-p-num">' + a.label + '</span><div class="dd-p-body">' + slotHtml(a) + '</div>';
+					li.addEventListener('click', function () { selectAnn(a.id); });
+					list.appendChild(li); rows[a.id] = li;
+				})(sa[j]);
+			}
+			if (selected && rows[selected]) rows[selected].classList.add('dd-active');
+		}
+		docBtn.addEventListener('click', function () {
+			docMode = !docMode;
+			doc.body.classList.toggle('dd-doc-mode', docMode);
+			docBtn.textContent = docMode ? '전체 보기' : '문서 뷰';
+			docBtn.classList.toggle('dd-on', docMode);
+			renderList();
+		});
+		renderList();
 		function selectAnn(id) {
 			selected = id;
 			for (var k in nodes) if (nodes.hasOwnProperty(k)) nodes[k].classList.toggle('dd-active', k === id);
@@ -159,10 +189,12 @@
 		}
 
 		// ---- 레이아웃(요소/좌표 실시간 재계산) ----
+		var lastScreen; // 직전 화면 — 바뀌면 문서 뷰 목록을 현재 화면 기준으로 재렌더
 		function layout() {
 			if (!doc.body || !doc.getElementById('dd-overlay-root')) return;
 			var rootRect = root.getBoundingClientRect();
 			var screen = curScreen();
+			if (screen !== lastScreen) { lastScreen = screen; if (docMode) renderList(); }
 			for (var i = 0; i < anns.length; i++) {
 				var a = anns[i], node = nodes[a.id];
 				if (!node) continue;

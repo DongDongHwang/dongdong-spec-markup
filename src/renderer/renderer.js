@@ -12,6 +12,7 @@ const docpath = document.getElementById('docpath');
 const splitBtn = document.getElementById('split-btn');
 const newWinBtn = document.getElementById('newwin-btn');
 const editBtn = document.getElementById('edit-btn');
+const docBtn = document.getElementById('doc-btn');
 const saveBtn = document.getElementById('save-btn');
 const panes = document.getElementById('panes');
 const annotPanel = document.getElementById('annot-panel');
@@ -166,7 +167,7 @@ function createTab(group) {
 	contentEl.append(welcomeEl, frame);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
-		editMode: false, dirty: false, // M3 — 주석 편집 토글 + 미저장 표시(저장은 M5)
+		editMode: false, docMode: false, dirty: false, // M3 편집 토글 + M5.5 문서 뷰 토글(상호 배타) + 미저장 표시
 		contentEl, welcomeEl, frame,
 		navHistory: [], navIndex: -1,
 	};
@@ -206,7 +207,9 @@ function attachOverlay(tab) {
 	tab.overlay = DDOverlay.attach(tab.frame, set, {
 		editable: tab.editMode,
 		onChange: () => { markDirty(tab); renderAnnotPanel(); },
-		onSelect: (id) => highlightAnnotRow(id),
+		onSelect: (id) => { if (tab.docMode) highlightDocRow(id); else highlightAnnotRow(id); },
+		onScreenChange: () => { if (tab.docMode) renderAnnotPanel(); }, // 문서 뷰 중 목업 화면 전환 시 우측 표 재렌더
+
 		onDeleteRequest: (id) => removeAnnotation(tab, id),
 	});
 }
@@ -265,6 +268,7 @@ function toggleEdit() {
 	const tab = activeTab();
 	if (!tab || !tab.docPath) return;
 	tab.editMode = !tab.editMode;
+	if (tab.editMode) tab.docMode = false; // 편집 ↔ 문서 뷰 상호 배타(편집은 쓰기, 문서 뷰는 읽기)
 	if (tab.editMode && !tab.annotations) {
 		tab.annotations = DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
 	}
@@ -273,6 +277,23 @@ function toggleEdit() {
 	syncTopbar();
 }
 if (editBtn) editBtn.addEventListener('click', toggleEdit);
+
+// ---- 문서 뷰 토글 (M5.5) — 목업 + 우측 번호·설명 표(읽기 전용 1세대 포맷) --------------
+// 편집과 배타. 켜면 오버레이를 읽기 모드로 붙이고 우측 패널을 문서 표로 렌더한다(renderAnnotPanel 분기).
+function toggleDocMode() {
+	const tab = activeTab();
+	if (!tab || !tab.docPath) return;
+	const hasAnn = !!(tab.annotations && tab.annotations.annotations.length > 0);
+	if (!tab.docMode && !hasAnn) return; // 켤 땐 주석 필요(재렌더할 게 없으면 의미 없음), 끌 땐 무조건 허용
+	tab.docMode = !tab.docMode;
+	if (tab.docMode) {
+		tab.editMode = false; // 문서 뷰는 읽기 — 편집 강제 해제
+		if (tab.overlay) tab.overlay.setEditable(false);
+		else attachOverlay(tab); // 주석 있으면 읽기 오버레이 부착(핀 표시)
+	}
+	syncTopbar();
+}
+if (docBtn) docBtn.addEventListener('click', toggleDocMode);
 
 // 활성 그룹 전환 (시각 강조·topbar 반영)
 function setActiveGroup(id) {
@@ -368,6 +389,7 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	tab.annotations = io.set;
 	tab.exists = true;
 	tab.editMode = false; // 새 문서 = 뷰어 모드부터 (편집은 명시 토글)
+	tab.docMode = false;  // 문서 뷰도 리셋(이전 문서의 표 잔류 방지)
 	tab.dirty = false;
 	if (opts.history !== false) pushTabHistory(tab, tab.docPath);
 	tab.frame.srcdoc = tab.pure; // iframe 격리 렌더(순수 목업) — load 시 네비 가드+오버레이 재부착
@@ -553,9 +575,15 @@ function syncTopbar() {
 		editBtn.disabled = !hasDoc;
 		editBtn.classList.toggle('is-on', !!(tab && tab.editMode));
 	}
+	const hasAnn = !!(tab && tab.annotations && tab.annotations.annotations.length > 0);
+	if (docBtn) {
+		// 문서 뷰 = 주석이 있어야 의미(핀·설명을 표로 재렌더). 주석 없으면 비활성.
+		docBtn.disabled = !(hasDoc && hasAnn);
+		docBtn.classList.toggle('is-on', !!(tab && tab.docMode));
+	}
+	if (layoutEl) layoutEl.classList.toggle('doc-mode', !!(tab && tab.docMode)); // 문서 뷰 레이아웃(우측 표 넓힘·편집 UI 숨김)
 	if (saveBtn) {
 		// 저장 가능 = 문서 있고 (미저장 변경 또는 주석 보유). 주석 없는 원본만 열린 상태면 저장 의미 없음.
-		const hasAnn = !!(tab && tab.annotations && tab.annotations.annotations.length > 0);
 		saveBtn.disabled = !(hasDoc && (tab.dirty || hasAnn));
 	}
 	renderAnnotPanel();
@@ -573,6 +601,8 @@ function annotTypeIcon(a) { return a.type === 'box' ? '▭' : '📍'; }
 function renderAnnotPanel() {
 	if (!annotPanel) return;
 	const tab = activeTab();
+	if (tab && tab.docMode && tab.docPath) { renderDocPanel(tab); return; } // 문서 뷰는 읽기 표로(편집 패널 우회)
+	annotPanel.classList.remove('doc-mode');
 	const set = tab && tab.annotations;
 	const anns = set && Array.isArray(set.annotations) ? DDNumbering.sortedBySeq(set) : [];
 	const show = !!(tab && tab.docPath && (tab.editMode || anns.length > 0));
@@ -700,6 +730,62 @@ function highlightAnnotRow(id) {
 		if (on) el.scrollIntoView({ block: 'nearest' });
 	});
 	renderDetail();
+}
+
+// ---- 문서 뷰 (M5.5) — 현재 화면 소속 핀을 seq 순 번호·설명 표로 상시 노출(읽기 전용) --------
+// 현재 화면 ID — spec-html APP_DATA.currentScreen(realm eval). generic·화면개념 없으면 null.
+function currentScreenId(tab) {
+	try { const app = DDOverlay.readAppData(tab.frame); return app ? (app.currentScreen || null) : null; }
+	catch (_) { return null; }
+}
+// 문서 뷰에 실을 주석 — 현재 화면 소속 + 화면 무관 좌표핀만. 화면 개념 없으면(generic) 전부.
+function docAnnotationsFor(tab) {
+	const set = tab.annotations;
+	if (!set || !Array.isArray(set.annotations)) return [];
+	const anns = DDNumbering.sortedBySeq(set);
+	const cur = currentScreenId(tab);
+	if (!cur) return anns;
+	return anns.filter((a) => { const sid = a.anchor && a.anchor.screenId; return !sid || sid === cur; });
+}
+// 설명 body → 렌더 HTML. html 우선, plain 폴백, 둘 다 없으면 '설명 없음'.
+function docBodyHtml(a) {
+	if (a.body && a.body.html) return a.body.html;
+	if (a.body && a.body.plain) return '<p>' + escapeHtml(a.body.plain) + '</p>';
+	return '<p class="doc-empty">(설명 없음)</p>';
+}
+function renderDocPanel(tab) {
+	annotPanel.classList.remove('hidden');
+	annotPanel.classList.add('doc-mode');
+	if (apGutter) apGutter.classList.remove('hidden');
+	if (apDetail) apDetail.classList.add('hidden'); // 편집기 숨김
+	if (apReopen) apReopen.classList.toggle('hidden', !layoutEl.classList.contains('panel-collapsed'));
+	const anns = docAnnotationsFor(tab);
+	apCount.textContent = String(anns.length);
+	annotList.innerHTML = '';
+	for (const a of anns) {
+		const li = document.createElement('li');
+		li.className = 'doc-row';
+		li.dataset.annotId = a.id;
+		const num = document.createElement('span');
+		num.className = 'doc-num';
+		num.textContent = a.label;
+		const body = document.createElement('div');
+		body.className = 'doc-body';
+		body.innerHTML = docBodyHtml(a);
+		li.append(num, body);
+		li.addEventListener('click', () => { if (tab.overlay) tab.overlay.select(a.id); highlightDocRow(a.id); });
+		annotList.appendChild(li);
+	}
+	if (tab.overlay) highlightDocRow(tab.overlay.getSelected());
+}
+// 문서 뷰 행 하이라이트 + 스크롤(편집기 렌더 없음 — 읽기 전용)
+function highlightDocRow(id) {
+	if (!annotList) return;
+	annotList.querySelectorAll('.doc-row').forEach((el) => {
+		const on = !!id && el.dataset.annotId === id;
+		el.classList.toggle('is-active', on);
+		if (on) el.scrollIntoView({ block: 'nearest' });
+	});
 }
 
 // ---- 설명 편집기 (M4) — 선택된 핀의 자유 리치텍스트 + 5종 슬롯 -----------------
@@ -893,6 +979,9 @@ document.addEventListener('keydown', (e) => {
 	} else if (ctrl && (e.key === 'e' || e.key === 'E')) {
 		e.preventDefault();
 		toggleEdit();
+	} else if (ctrl && (e.key === 'd' || e.key === 'D')) {
+		e.preventDefault();
+		toggleDocMode();
 	} else if (ctrl && e.key === '\\') {
 		e.preventDefault();
 		splitActive();
