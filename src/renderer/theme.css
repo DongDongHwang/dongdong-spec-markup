@@ -710,3 +710,12 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 .slot-add { align-self: flex-start; border: 1px dashed var(--dd-purple); background: transparent; color: var(--dd-purple); border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .slot-add:hover { background: color-mix(in srgb, var(--dd-purple) 8%, transparent); }
 .slot-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+
+/* ---- 편집 도구 팔레트 (B 1단계 — 주석/텍스트) ---- */
+.ap-tools { display: flex; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.tool-btn { border: 1px solid var(--border); background: transparent; color: var(--fg); border-radius: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; cursor: pointer; }
+.tool-btn:hover { background: color-mix(in srgb, var(--dd-purple) 8%, transparent); }
+.tool-btn.is-on { background: var(--dd-purple); color: #fff; border-color: var(--dd-purple); }
+/* 텍스트 주석 마커(T) — 번호 원 대신 보라 아웃라인 */
+.annot-label.is-text { color: var(--dd-purple); }
+.doc-num.is-text { background: transparent; color: var(--dd-purple); border: 1px solid var(--dd-purple); }

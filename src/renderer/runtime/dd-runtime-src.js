@@ -30,7 +30,8 @@
 	background: #7460D9; color: #fff; border-radius: 4px 4px 4px 0;
 	font: 700 10px/1 Pretendard, -apple-system, sans-serif; pointer-events: auto; user-select: none;
 }
-#dd-overlay-root .dd-pin.dd-active, #dd-overlay-root .dd-box.dd-active { outline: 3px solid rgba(116,96,217,.5); outline-offset: 2px; }
+#dd-overlay-root .dd-pin.dd-active, #dd-overlay-root .dd-box.dd-active, #dd-overlay-root .dd-text.dd-active { outline: 3px solid rgba(116,96,217,.5); outline-offset: 2px; }
+#dd-overlay-root .dd-text { position: absolute; transform: none; max-width: 240px; padding: 4px 8px; box-sizing: border-box; background: rgba(255,255,255,.94); color: #1f2328; border: 1px solid #7460D9; border-radius: 6px; font: 600 12px/1.45 Pretendard, -apple-system, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.2); white-space: pre-wrap; word-break: break-word; pointer-events: auto; cursor: pointer; }
 #dd-overlay-root .dd-pin.dd-st-new { background: #18a558; }
 #dd-overlay-root .dd-pin.dd-st-modified { background: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
@@ -61,6 +62,7 @@
 #dd-panel .dd-p-row:hover { background: rgba(116,96,217,.08); }
 #dd-panel .dd-p-row.dd-active { background: rgba(116,96,217,.14); }
 #dd-panel .dd-p-num { flex: 0 0 auto; min-width: 22px; height: 20px; padding: 0 6px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; background: #7460D9; color: #fff; font-weight: 700; font-size: 11px; border-radius: 999px; }
+#dd-panel .dd-p-num.is-text { background: transparent; color: #7460D9; border: 1px solid #7460D9; }
 #dd-panel .dd-p-body { flex: 1 1 auto; min-width: 0; }
 #dd-panel .dd-p-body ul { margin: 2px 0; padding-left: 16px; }
 #dd-panel.dd-collapsed { width: auto; bottom: auto; }
@@ -210,6 +212,16 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		for (var i = 0; i < anns.length; i++) {
 			(function (a) {
 				var el;
+					if (a.type === 'text') { // 캔버스 텍스트 — 번호·배지·색 없이 내용만(읽기전용)
+						el = doc.createElement('div'); el.className = 'dd-text';
+						el.textContent = (a.body && a.body.plain) || '';
+						el.setAttribute('data-dd-id', a.id);
+						if (a.body && a.body.plain) el.title = a.body.plain;
+						el.style.display = 'none';
+						el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
+						root.appendChild(el); nodes[a.id] = el;
+						return;
+					}
 				if (a.type === 'box') {
 					el = doc.createElement('div'); el.className = 'dd-box';
 					var lb = doc.createElement('span'); lb.className = 'dd-box-label'; lb.textContent = a.label; el.appendChild(lb);
@@ -288,14 +300,15 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
 					var lst = annStatus(a);
+					var isT = a.type === 'text'; // 텍스트 = 번호·배지 없음
 					// 색 SSOT 정합 — 신규 배지는 차수색(statusCol)을 핀과 동일하게 인라인(저장본 배경=흰색). 수정은 클래스 유지.
 					var lbadge = '';
-					if (lst === 'new') { var bc = statusCol(a); lbadge = '<span class="dd-p-badge dd-b-new" style="color:' + bc + ';background:color-mix(in srgb,' + bc + ' 18%,#fff)">' + annBadgeLabel(a) + '</span>'; }
-					else if (lst === 'modified') { lbadge = '<span class="dd-p-badge dd-b-modified">' + annBadgeLabel(a) + '</span>'; }
+					if (!isT && lst === 'new') { var bc = statusCol(a); lbadge = '<span class="dd-p-badge dd-b-new" style="color:' + bc + ';background:color-mix(in srgb,' + bc + ' 18%,#fff)">' + annBadgeLabel(a) + '</span>'; }
+					else if (!isT && lst === 'modified') { lbadge = '<span class="dd-p-badge dd-b-modified">' + annBadgeLabel(a) + '</span>'; }
 					var lgc = isGrp(a) ? groupCol(grpKey(a)) : null; // 그룹색(1-A/1-B)
 					var numStyle = lgc ? ' style="background:' + lgc + ';color:#fff"' : '';
 					var lcap = (a.mark && (a.mark.addedAt || a.mark.reason)) ? '<div class="dd-p-mark" style="color:' + statusCol(a) + '">' + escHtml(annTip(a)) + '</div>' : ''; // 날짜·사유
-					li.innerHTML = '<span class="dd-p-num"' + numStyle + '>' + a.label + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + lcap + '</div>';
+					li.innerHTML = '<span class="dd-p-num' + (isT ? ' is-text' : '') + '"' + (isT ? '' : numStyle) + '>' + (isT ? 'T' : a.label) + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + lcap + '</div>';
 					if (lgc) li.style.borderLeft = '3px solid ' + lgc;
 					if (a.parentId) li.style.paddingLeft = '18px';
 					li.addEventListener('click', function () { selectAnn(a.id); });

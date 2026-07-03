@@ -62,6 +62,16 @@ const DDOverlay = (() => {
 /* 드래그 중 앵커 예측 — 요소에 붙음(초록·따라감) / 좌표에 고정(회색 점선) */
 #${ROOT_ID}.dd-editing .dd-will-element { outline: 3px solid rgba(24,165,88,.75); outline-offset: 3px; }
 #${ROOT_ID}.dd-editing .dd-will-coord { outline: 3px dashed rgba(107,114,128,.85); outline-offset: 3px; }
+/* 캔버스 텍스트(B 1단계) — 번호 없는 텍스트 박스. 좌상단 앵커(transform none). */
+#${ROOT_ID} .dd-text {
+	position: absolute; transform: none; max-width: 240px; padding: 4px 8px; box-sizing: border-box;
+	background: rgba(255,255,255,.94); color: #1f2328; border: 1px solid #7460D9; border-radius: 6px;
+	font: 600 12px/1.45 Pretendard, -apple-system, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.2);
+	white-space: pre-wrap; word-break: break-word; pointer-events: auto; cursor: default; user-select: none;
+}
+#${ROOT_ID}.dd-editing .dd-text { cursor: move; }
+#${ROOT_ID}:not(.dd-editing) .dd-text { cursor: pointer; }
+body:has(#${ROOT_ID}.dd-tool-text) { cursor: text !important; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
@@ -243,36 +253,43 @@ body.clean #screen-nav { display: none !important; }
 				lb.className = 'dd-box-label';
 				lb.textContent = a.label;
 				el.appendChild(lb);
+			} else if (a.type === 'text') {
+				// 캔버스 텍스트(B 1단계) — 번호·배지·색 없이 내용만. 앵커는 포인트(핀과 동일 경로).
+				el = doc.createElement('div');
+				el.className = 'dd-text';
+				el.textContent = (a.body && a.body.plain) || '텍스트';
 			} else {
 				el = doc.createElement('div');
 				el.className = 'dd-pin';
 				el.textContent = a.label;
 			}
 			el.dataset.ddId = a.id;
-			const badge = DDModel.annotBadge(a); // { status, label, tooltip } — 사용자 마킹 우선, 없으면 origin 폴백
-			el.classList.add('dd-st-' + badge.status);
-			applyPinColor(el, a); // 색 SSOT(인라인) — 신규 차수색·수정 주황·기존 현행·그룹 ring
-			const ph = (a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0;
-			if (ph) { // 신규 2차 이상 — 차수 배지(색도 차수색)
-				el.classList.add('dd-ph');
-				const pb = doc.createElement('span');
-				pb.className = 'dd-phase-badge';
-				pb.textContent = ph + '차';
-				pb.style.background = DDModel.phaseColor(ph);
-				el.appendChild(pb);
-			}
-			if (a.type !== 'box' && a.mark && a.mark.addedAt) { // 목업 위 핀엔 날짜만(사유는 우측 목록에)
-				const dc = doc.createElement('span');
-				dc.className = 'dd-date-cap';
-				dc.textContent = a.mark.addedAt;
-				dc.style.color = DDModel.statusColor(a);
-				el.appendChild(dc);
-			}
 			const plain = a.body && a.body.plain;
-			const tip = [];
-			if (badge.tooltip) tip.push('[' + badge.label + ']  ' + badge.tooltip);
-			if (plain) tip.push(plain);
-			if (tip.length) el.title = tip.join('\n'); // 읽기 모드 — 네이티브 툴팁(마킹 + 설명)
+			if (a.type !== 'text') { // 배지·색·차수·날짜는 번호 주석(pin/box)만
+				const badge = DDModel.annotBadge(a); // { status, label, tooltip } — 사용자 마킹 우선, 없으면 origin 폴백
+				el.classList.add('dd-st-' + badge.status);
+				applyPinColor(el, a); // 색 SSOT(인라인) — 신규 차수색·수정 주황·기존 현행·그룹 ring
+				const ph = (a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0;
+				if (ph) { // 신규 2차 이상 — 차수 배지(색도 차수색)
+					el.classList.add('dd-ph');
+					const pb = doc.createElement('span');
+					pb.className = 'dd-phase-badge';
+					pb.textContent = ph + '차';
+					pb.style.background = DDModel.phaseColor(ph);
+					el.appendChild(pb);
+				}
+				if (a.type !== 'box' && a.mark && a.mark.addedAt) { // 목업 위 핀엔 날짜만(사유는 우측 목록에)
+					const dc = doc.createElement('span');
+					dc.className = 'dd-date-cap';
+					dc.textContent = a.mark.addedAt;
+					dc.style.color = DDModel.statusColor(a);
+					el.appendChild(dc);
+				}
+				const tip = [];
+				if (badge.tooltip) tip.push('[' + badge.label + ']  ' + badge.tooltip);
+				if (plain) tip.push(plain);
+				if (tip.length) el.title = tip.join('\n'); // 읽기 모드 — 네이티브 툴팁(마킹 + 설명)
+			}
 			el.style.display = 'none';
 			layer.appendChild(el);
 			nodes.set(a.id, el);
@@ -462,6 +479,16 @@ body.clean #screen-nav { display: none !important; }
 			select(a.id);
 			notifyChange();
 		}
+		// 텍스트 생성 — 좌상단 포인트 앵커(핀과 같은 자동판정). 번호 없음. 생성 후 선택 → 우측 패널서 내용 입력.
+		function createText(x, y) {
+			const hit = pinAnchorAt(x, y);
+			const a = DDModel.createAnnotation({ type: 'text', anchor: hit.anchor, coord: hit.coord, body: { format: 'html', html: '', plain: '' } });
+			DDNumbering.add(set, a);
+			rebuildNodes();
+			layout();
+			select(a.id);
+			notifyChange();
+		}
 
 		// 이동 확정 — 드롭 지점에서 앵커를 다시 판정한다(요소↔빈 곳 넘나들면 mode 도 전환).
 		function reanchor(a, node) {
@@ -472,8 +499,9 @@ body.clean #screen-nav { display: none !important; }
 				a.anchor = hit.anchor;
 				a.coord = hit.coord;
 			} else {
-				const cx = r.left + r.width / 2;
-				const cy = r.top + r.height / 2;
+				// 핀=중심, 텍스트=좌상단(렌더 기준과 일치)
+				const cx = a.type === 'text' ? r.left : r.left + r.width / 2;
+				const cy = a.type === 'text' ? r.top : r.top + r.height / 2;
 				const hit = pinAnchorAt(cx, cy);
 				a.anchor = hit.anchor;
 				a.coord = hit.coord;
@@ -519,7 +547,9 @@ body.clean #screen-nav { display: none !important; }
 				const hit = boxAnchorFor({ left: r.left + dx, top: r.top + dy, width: r.width, height: r.height });
 				a.anchor = hit.anchor; a.coord = hit.coord;
 			} else {
-				const hit = pinAnchorAt(r.left + r.width / 2 + dx, r.top + r.height / 2 + dy);
+				const px = a.type === 'text' ? r.left + dx : r.left + r.width / 2 + dx; // 텍스트=좌상단 기준
+				const py = a.type === 'text' ? r.top + dy : r.top + r.height / 2 + dy;
+				const hit = pinAnchorAt(px, py);
 				a.anchor = hit.anchor; a.coord = hit.coord;
 			}
 			layout();
@@ -527,12 +557,14 @@ body.clean #screen-nav { display: none !important; }
 		}
 
 		// 제스처 상태기 — mousedown 시작, DRAG_MIN 넘으면 드래그(이동/러버밴드), 미만이면 클릭(선택/핀 생성).
+		//   tool = 'annot'(기본: 클릭=핀·드래그=박스) | 'text'(클릭=텍스트, 드래그 없음).
 		let gesture = null;
+		let tool = 'annot';
 		function onMouseDown(e) {
 			if (!editable || e.button !== 0) return;
 			e.preventDefault();
 			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 읽기 모드에서
-			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box') : null;
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text') : null;
 			if (ddEl && ddEl.dataset.ddId) {
 				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
 				if (!a) return;
@@ -567,6 +599,7 @@ body.clean #screen-nav { display: none !important; }
 				gesture.node.classList.toggle('dd-will-element', !!willEl);
 				gesture.node.classList.toggle('dd-will-coord', !willEl);
 			} else {
+				if (tool === 'text') return; // 텍스트 도구는 드래그(러버밴드) 없음 — 클릭 지점에 생성
 				if (!gesture.rubber) {
 					gesture.rubber = doc.createElement('div');
 					gesture.rubber.className = 'dd-rubber';
@@ -591,6 +624,7 @@ body.clean #screen-nav { display: none !important; }
 				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
 			}
 			if (g.rubber) g.rubber.remove();
+			if (tool === 'text') { createText(g.sx, g.sy); return; } // 텍스트 도구 — 클릭 지점(드래그 무시)에 생성
 			if (g.moved) {
 				const left = Math.min(g.sx, e.clientX);
 				const top = Math.min(g.sy, e.clientY);
@@ -610,7 +644,7 @@ body.clean #screen-nav { display: none !important; }
 		//   핀·박스 라벨을 맞췄을 때만 봉인 — 그 외 클릭은 목업 goScreen 등으로 통과(화면 넘김 보존).
 		function onReadSelect(e) {
 			if (editable) return; // 편집 모드는 gesture 계열이 담당
-			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box') : null;
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text') : null;
 			if (!ddEl || !ddEl.dataset.ddId) return; // 핀 아닌 클릭 = 목업 통과
 			e.stopPropagation();
 			const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
@@ -678,6 +712,8 @@ body.clean #screen-nav { display: none !important; }
 			getSelectedClone,   // 복사용 deep clone
 			addClone,           // 붙여넣기·복제 — 새 id·오프셋 추가
 			nudgeSelected,      // 화살표 미세 이동
+			setTool(name) { tool = name === 'text' ? 'text' : 'annot'; root.classList.toggle('dd-tool-text', tool === 'text'); }, // 도구 전환(주석/텍스트)
+			getTool: () => tool,
 			// 패널(셸) 쪽 구조 변경(삭제·재번호·라벨) 후 호출 — 노드 전체 재생성 + 재배치
 			refresh() {
 				if (selectedId && !annotations().some((a) => a.id === selectedId)) selectedId = null;
@@ -687,7 +723,7 @@ body.clean #screen-nav { display: none !important; }
 			setEditable(on) {
 				editable = !!on;
 				root.classList.toggle('dd-editing', editable);
-				if (!editable) { gesture = null; dragNodeId = null; select(null); }
+				if (!editable) { gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text'); } // 편집 끄면 도구 기본 복귀
 			},
 			detach() {
 				try {

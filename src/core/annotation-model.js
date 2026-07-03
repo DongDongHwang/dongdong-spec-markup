@@ -12,7 +12,7 @@
 
 	const DD_VERSION = 4;               // v4 — 문서 메타(docMeta: 표지·History·개요·플로우) 도입. v1~v3 은 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
-	const TYPES = ['pin', 'box'];
+	const TYPES = ['pin', 'box', 'text']; // text = 번호 없는 캔버스 텍스트(B 1단계) — 시퀀스·계층에서 제외
 	const ANCHOR_MODES = ['element', 'coord'];
 	const SOURCE_KINDS = ['spec-html', 'generic'];
 	const MARK_KINDS = ['신규', '기존'];  // 사용자가 핀마다 직접 지정. 신규는 차수(phase)로 2·3차 확장.
@@ -89,12 +89,14 @@
 	// 주석 1건 — props 로 부분 지정, 나머지는 기본값. anchor/coord 는 호출자가 채운다.
 	function createAnnotation(props, rng) {
 		const p = props || {};
+		const type = TYPES.includes(p.type) ? p.type : 'pin';
+		const isText = type === 'text'; // 텍스트는 번호 없음(label 기본 ''·autoNumber 강제 false)
 		return {
 			id: p.id || genId(rng),
-			type: TYPES.includes(p.type) ? p.type : 'pin',
+			type,
 			seq: typeof p.seq === 'number' ? p.seq : 1,
-			label: p.label != null ? String(p.label) : '1',
-			autoNumber: p.autoNumber !== false,
+			label: p.label != null ? String(p.label) : (isText ? '' : '1'),
+			autoNumber: isText ? false : (p.autoNumber !== false),
 			parentId: p.parentId != null ? String(p.parentId) : null, // 1단계 계층 — 부모 핀 id(자식이면). null=최상위
 			anchor: p.anchor || null,   // { mode:'element', elementId, screenId?, offsetPct?, rectPct? }
 			coord: p.coord || null,     // { basis:'frame'|'body', x, y, w?, h? }  (mode='coord' 전용)

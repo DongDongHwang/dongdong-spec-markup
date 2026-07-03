@@ -377,6 +377,24 @@ test('numbering: 2단계 계층 금지 — 자식의 자식 불가', () => {
 	assert.strictEqual(s.annotations.find((a) => a.id === 'an_num003').parentId, null);
 });
 
+test('model/numbering: 텍스트 타입 — 번호 없음·시퀀스 제외(핀 번호 연속 유지)', () => {
+	const s = DDModel.createSet('generic');
+	// 기본값 — text 는 autoNumber false·label '' 자동
+	const t0 = DDModel.createAnnotation({ type: 'text', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.2, y: 0.2 }, body: { format: 'html', html: '<p>메모</p>', plain: '메모' } });
+	assert.strictEqual(t0.type, 'text');
+	assert.strictEqual(t0.autoNumber, false);
+	assert.strictEqual(t0.label, '');
+	// 핀 - 텍스트 - 핀 순으로 추가해도 핀 번호는 1,2 연속(텍스트가 번호를 소비하지 않음)
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pin001', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_txt001', type: 'text', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.3, y: 0.3 }, body: { format: 'html', html: '', plain: '노트' } }));
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pin002', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.5, y: 0.5 } }));
+	assert.strictEqual(s.annotations.find((a) => a.id === 'an_pin001').label, '1');
+	assert.strictEqual(s.annotations.find((a) => a.id === 'an_pin002').label, '2'); // 텍스트 건너뛰고 연속
+	assert.strictEqual(s.annotations.find((a) => a.id === 'an_txt001').label, '');   // 텍스트는 무번호 유지
+	// 검증 통과(text + coord)
+	assert.strictEqual(DDModel.validateSet(s).ok, true);
+});
+
 test('model: 색 SSOT — 차수별 다름·그룹색·상태색', () => {
 	assert.notStrictEqual(DDModel.phaseColor(1), DDModel.phaseColor(2));
 	assert.notStrictEqual(DDModel.phaseColor(2), DDModel.phaseColor(3)); // 2·3차 이제 서로 다름
