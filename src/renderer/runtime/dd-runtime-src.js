@@ -133,7 +133,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		if (!set || !set.annotations || !set.annotations.length) return;
 		var anns = set.annotations;
 		// spec-html 목업이면 자체 주석(area-rail·el-pin·매핑) 끄기 — dd 핀과 겹침 방지(dd 앱 clean 과 동일). 목업 좌하단 토글로 되돌릴 수 있다.
-		try { if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) doc.body.classList.add('clean'); } catch (e) {}
+		try { var __isSpec = (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) || (typeof SCREENS !== 'undefined' && SCREENS); if (__isSpec) doc.body.classList.add('clean'); } catch (e) {} // 두 방언(APP_DATA·SCREENS) 모두 clean
 		// diff 상태 — 사용자 mark 우선(신규/기존), 없으면 origin 폴백. dd 앱 annotStatus 판박이.
 		function annStatus(a) { if (a && a.mark && a.mark.kind) return a.mark.kind === '신규' ? 'new' : 'unchanged'; if (!a || a.origin !== 'draft') return 'new'; return a.edited ? 'modified' : 'unchanged'; }
 		function annPhase(a) { return (a && a.mark && a.mark.kind === '신규' && a.mark.phase >= 2) ? a.mark.phase : 0; }
@@ -184,7 +184,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		function esc(id) {
 			return (win.CSS && win.CSS.escape) ? win.CSS.escape(id) : String(id).replace(/["\\]/g, '\\$&');
 		}
-		function queryEl(id) { return doc.querySelector('[data-element-id="' + esc(id) + '"]') || doc.querySelector('[data-field="' + esc(id) + '"]'); } // 앱 data-element-id + 어드민 data-field
+		function queryEl(id) { return doc.querySelector('[data-element-id="' + esc(id) + '"]') || doc.querySelector('[data-field="' + esc(id) + '"]') || doc.querySelector('[data-el="' + esc(id) + '"]'); } // 앱 data-element-id + 어드민 data-field + 신방언 data-el
 		function basisEl(basis) {
 			if (basis === 'frame') return doc.querySelector('.mobile-frame') || doc.querySelector('.web-frame') || doc.querySelector('.frame-stage') || doc.body;
 			return doc.body;
@@ -197,6 +197,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		}
 		function curScreen() {
 			try { if (typeof APP_DATA !== 'undefined' && APP_DATA) return APP_DATA.currentScreen || null; } catch (e) {}
+			try { if (typeof STATE !== 'undefined' && STATE && STATE.cur) return STATE.cur; } catch (e) {} // 신 방언 STATE.cur
 			for (var i = 0; i < anns.length; i++) { var s = anns[i].anchor && anns[i].anchor.screenSel; if (s) { var e = doc.querySelector(s); if (renderable(e)) return s; } } // generic 폴백
 			return null;
 		}
@@ -434,9 +435,11 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		// 화면 목록 = 신버전 APP_DATA.screens(SSOT). 없으면 현재 1장 폴백(generic 전환함수 제각각 → v1 범위 밖, dd 앱 클론 인프라와 동일 방침).
 		function listScreensRT() {
 			try {
-				if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) {
-					return Object.keys(APP_DATA.screens).map(function (k) {
-						var s = APP_DATA.screens[k] || {};
+				var src = (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) ? APP_DATA.screens
+					: (typeof SCREENS !== 'undefined' && SCREENS) ? SCREENS : null; // 두 방언(APP_DATA·SCREENS)
+				if (src) {
+					return Object.keys(src).map(function (k) {
+						var s = src[k] || {};
 						return { id: s.id || k, name: s.name || s.id || k };
 					}).filter(function (s) { return s.id; });
 				}

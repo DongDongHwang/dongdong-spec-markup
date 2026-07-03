@@ -119,14 +119,14 @@ body.clean #screen-nav { display: none !important; }
 		const esc = (doc.defaultView && doc.defaultView.CSS && doc.defaultView.CSS.escape)
 			? doc.defaultView.CSS.escape(elementId)
 			: String(elementId).replace(/["\\]/g, '\\$&');
-		return doc.querySelector(`[data-element-id="${esc}"]`) || doc.querySelector(`[data-field="${esc}"]`);
+		return doc.querySelector(`[data-element-id="${esc}"]`) || doc.querySelector(`[data-field="${esc}"]`) || doc.querySelector(`[data-el="${esc}"]`);
 	}
 
-	// 요소의 앵커 id — data-element-id(앱) 우선, 없으면 data-field(어드민). 둘 다 안정 식별자.
+	// 요소의 앵커 id — data-element-id(구 앱) → data-field(어드민) → data-el(신 SCREENS 방언). 셋 다 안정 식별자.
 	function elementIdOf(el) {
-		return el.getAttribute('data-element-id') || el.getAttribute('data-field');
+		return el.getAttribute('data-element-id') || el.getAttribute('data-field') || el.getAttribute('data-el');
 	}
-	const ANCHOR_SEL = '[data-element-id], [data-field]';
+	const ANCHOR_SEL = '[data-element-id], [data-field], [data-el]';
 
 	// coord 모드 기준 컨테이너 — 'frame' 은 목업 프레임 우선, 폴백 body (자유형 정적 목업 대응).
 	function basisElement(doc, basis) {
@@ -154,9 +154,24 @@ body.clean #screen-nav { display: none !important; }
 		} catch (_) { return null; }
 	}
 
-	// spec-html 목업 판별 — 셸(renderer)의 세트 kind 결정용.
+	// 신 방언(SCREENS) — 현재 spec-html 은 APP_DATA 대신 전역 `const SCREENS`{id,name,areas} + 전역 goScreen 을 쓴다.
+	//   APP_DATA 와 같은 lexical 바인딩이라 realm 내 간접 eval 로 읽는다.
+	function resolveScreens(win) {
+		try {
+			if (win.SCREENS) return win.SCREENS;
+			return win.eval('typeof SCREENS === "undefined" ? null : SCREENS') || null;
+		} catch (_) { return null; }
+	}
+
+	// 신 방언 현재 화면 — goScreen(id) 가 갱신하는 `STATE.cur`(lexical) 를 realm eval 로 읽는다. 없으면 null.
+	function resolveCurScreen(win) {
+		try { return win.eval('typeof STATE !== "undefined" && STATE ? (STATE.cur || null) : null') || null; }
+		catch (_) { return null; }
+	}
+
+	// spec-html 목업 판별 — 셸(renderer)의 세트 kind 결정용. 두 방언(APP_DATA·SCREENS) 모두 인식.
 	function detectSpecHtml(frame) {
-		try { return !!resolveAppData(frame.contentWindow); } catch (_) { return false; }
+		try { const w = frame.contentWindow; return !!(resolveAppData(w) || resolveScreens(w)); } catch (_) { return false; }
 	}
 
 	// APP_DATA 원본 반환 — 셸의 초안 주입(M4)·화면 네비(M6)가 screens/areas/elements/desc 를 읽는다. 없으면 null(generic 목업).
@@ -164,10 +179,38 @@ body.clean #screen-nav { display: none !important; }
 		try { return resolveAppData(frame.contentWindow); } catch (_) { return null; }
 	}
 
-	// dd → 목업 제어 — 화면 전환(M6 화면 네비). spec-html goScreen(id) 를 realm 내에서 호출(readAppData 와 같은 오리진).
+	// 화면 목록 공통형 [{id,name}] — 두 방언 흡수(APP_DATA.screens 또는 SCREENS). renderer 화면 네비가 사용.
+	function readScreens(frame) {
+		try {
+			const w = frame.contentWindow;
+			const ad = resolveAppData(w);
+			const src = (ad && ad.screens) || resolveScreens(w);
+			if (src && typeof src === 'object') {
+				return Object.keys(src).map((k) => { const s = src[k] || {}; return { id: s.id || k, name: s.name || s.id || k }; }).filter((s) => s.id);
+			}
+		} catch (_) { /* 접근 불가 */ }
+		return [];
+	}
+
+	// 현재 화면 id (renderer 표시용) — APP_DATA.currentScreen 또는 신 방언 STATE.cur.
+	function curScreen(frame) {
+		try { const w = frame.contentWindow; const ad = resolveAppData(w); return ad ? (ad.currentScreen || null) : resolveCurScreen(w); }
+		catch (_) { return null; }
+	}
+
+	// dd → 목업 제어 — 화면 전환. (1) window.goScreen 직접 (2) eval 로 goScreen 존재 확인 후 호출
+	//   (3) 목업 nav 요소 click 폴백. goScreen 이 함수 스코프 안 const 라 window·eval 로 안 잡히는 목업이 많다(회원가입 v2.6 등)
+	//   → 그 경우 목업 자체 nav 요소(핸들러가 goScreen 을 클로저로 잡고 있음)를 클릭해야 전환된다. 핵심 = 각 단계가 "실제 성공"일 때만 종료.
 	function gotoScreen(frame, id) {
-		try { frame.contentWindow.eval("typeof goScreen==='function' && goScreen(" + JSON.stringify(String(id)) + ")"); }
-		catch (_) { /* 함수 없거나 접근 불가 — 무시 */ }
+		const sid = String(id);
+		const w = frame.contentWindow;
+		try { if (w && typeof w.goScreen === 'function') { w.goScreen(sid); return; } } catch (_) {}
+		try { if (w && w.eval("typeof goScreen==='function'") === true) { w.eval('goScreen(' + JSON.stringify(sid) + ')'); return; } } catch (_) {} // 존재 확인 후에만 호출(단락 false 로 조기 return 방지)
+		try {
+			const d = frame.contentDocument;
+			const el = d && d.querySelector('[data-go="' + sid + '"], [data-goscreen="' + sid + '"], [data-screen="' + sid + '"], .screen-item[data-screen="' + sid + '"]');
+			if (el) el.click(); // clean 으로 숨겨져도 프로그래밍 click 은 핸들러 발화
+		} catch (_) { /* 전부 실패 — 무시 */ }
 	}
 
 	function attach(frame, set, opts) {
@@ -178,6 +221,8 @@ body.clean #screen-nav { display: none !important; }
 		let editable = !!opts.editable;
 		let selectedId = null;
 		const mock = resolveAppData(win); // spec-html APP_DATA (자유형이면 null)
+		const screensObj = mock ? null : resolveScreens(win); // 신 방언 SCREENS (APP_DATA 없을 때만)
+		const isSpec = !!(mock || screensObj); // 두 방언 통합 판별 — 화면 게이팅·tagScreen 공통 적용
 		function cssEsc(s) { return (win.CSS && win.CSS.escape) ? win.CSS.escape(s) : String(s).replace(/["\\#.:]/g, '\\$&'); }
 		// generic 목업 화면 감지 — APP_DATA 없이도 "display 토글되는 형제 그룹의 보이는 일원"을 현재 화면으로.
 		//   id 있는 컨테이너만 채택(견고). 못 찾으면 null → 게이팅 off(전부 렌더, 현행 유지). STORY 식 #screen-N 커버.
@@ -199,7 +244,7 @@ body.clean #screen-nav { display: none !important; }
 			// spec-html(mock 존재) 만 screen 을 APP_DATA 화면 ID 로 신뢰해 screenId 로 저장.
 			//   generic 은 screen 값이 실은 다른 핀의 screenSel 문자열(genScreen 반환)이라 screenId 로 넣으면
 			//   화면 넘김 게이팅이 깨진다(screen=null 시 screenId 조건 무력화) → 항상 DOM 컨테이너 재감지해 screenSel 로.
-			if (mock && screen) { anchor.screenId = screen; return; }
+			if (isSpec && screen) { anchor.screenId = screen; return; } // 두 방언 모두 screenId(화면 ID)로 저장
 			const sel = detectScreenSel(doc.elementFromPoint(px, py));
 			if (sel) anchor.screenSel = sel;
 		}
@@ -214,6 +259,7 @@ body.clean #screen-nav { display: none !important; }
 		// 현재 화면 ID — screenId/screenSel 불일치 주석은 렌더 스킵(숨은 트레이 보존).
 		function currentScreen() {
 			if (mock) { try { return mock.currentScreen || null; } catch (_) { return null; } }
+			if (screensObj) { const c = resolveCurScreen(win); if (c) return c; } // 신 방언 — STATE.cur
 			return genScreen();
 		}
 
@@ -1022,10 +1068,12 @@ body.clean #screen-nav { display: none !important; }
 	//   구버전(.screen-view)·generic 자동 순회는 목업별 전환함수·컨테이너가 제각각이라 v1 범위 밖(폴백으로 안전).
 	function listScreens(frame) {
 		try {
-			const app = resolveAppData(frame.contentWindow);
-			if (app && app.screens && typeof app.screens === 'object') {
-				return Object.keys(app.screens).map((k) => {
-					const s = app.screens[k] || {};
+			const w = frame.contentWindow;
+			const app = resolveAppData(w);
+			const src = (app && app.screens && typeof app.screens === 'object') ? app.screens : resolveScreens(w);
+			if (src && typeof src === 'object') {
+				return Object.keys(src).map((k) => {
+					const s = src[k] || {};
 					return { id: s.id || k, name: s.name || s.id || k, type: s.type || 'page' };
 				}).filter((s) => s.id);
 			}
@@ -1090,5 +1138,5 @@ body.clean #screen-nav { display: none !important; }
 		});
 	}
 
-	return { attach, detectSpecHtml, readAppData, gotoScreen, listScreens, snapshotScreen, readCover, readHistory };
+	return { attach, detectSpecHtml, readAppData, readScreens, curScreen, gotoScreen, listScreens, snapshotScreen, readCover, readHistory };
 })();

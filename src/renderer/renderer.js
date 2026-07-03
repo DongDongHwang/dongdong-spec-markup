@@ -1113,11 +1113,10 @@ function highlightDocRow(id) {
 function renderScreenNav() {
 	if (!screenSection || !screenList) return;
 	const tab = activeTab();
-	const app = (tab && tab.docPath) ? DDOverlay.readAppData(tab.frame) : null;
-	const screens = (app && app.screens) ? Object.keys(app.screens).map((k) => app.screens[k]).filter((s) => s && s.id) : [];
+	const screens = (tab && tab.docPath) ? DDOverlay.readScreens(tab.frame) : []; // 두 방언(APP_DATA·SCREENS) 공통형
 	if (screens.length === 0) { screenSection.classList.add('hidden'); return; }
 	screenSection.classList.remove('hidden');
-	const cur = app.currentScreen;
+	const cur = (tab && tab.docPath) ? DDOverlay.curScreen(tab.frame) : null;
 	const set = tab.annotations;
 	screenList.innerHTML = '';
 	for (const s of screens) {
