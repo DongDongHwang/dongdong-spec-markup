@@ -178,6 +178,21 @@ app.whenReady().then(async () => {
 	const win = BrowserWindow.getAllWindows()[0];
 	if (!win) { console.log('FAIL 창이 없음'); app.exit(1); return; }
 	const wc = win.webContents;
+	// 화면 전환 후 재렌더 대기 — 고정 sleep 은 headless 부하에서 들쭉날쭉(플레이키). 조건 충족까지 폴링한다.
+	//   expr(truthy)면 즉시 반환. timeout 초과 시 false → 뒤이은 check 가 실제 값으로 FAIL(진짜 실패만 남김).
+	async function waitFor(expr, timeout = 4000, interval = 80) {
+		const start = Date.now();
+		while (Date.now() - start < timeout) {
+			try {
+				// headless(숨은 창)에선 schedule() 의 requestAnimationFrame 이 throttle/pause 되어 재렌더가 안 돈다.
+				// 판정 전 강제 relayout 으로 onScreenChange·게이팅을 동기 실행(롱스크롤 테스트가 쓰는 패턴).
+				await wc.executeJavaScript(`(function(){ try{ window.activeTab().overlay.relayout(); }catch(_){} return true; })()`);
+				if (await wc.executeJavaScript(expr)) return true;
+			} catch (_) { /* 전환 순간 접근불가 — 재시도 */ }
+			await wait(interval);
+		}
+		return false;
+	}
 
 	console.log('== spec-html 목업 (2화면 앵커) ==');
 	const r1 = await wc.executeJavaScript(SPEC_SCENARIO);
@@ -195,7 +210,8 @@ app.whenReady().then(async () => {
 	check('History 표 1행(APP_DATA.history)', r1.histRows === 1, 'histRows=' + r1.histRows);
 
 	await wc.executeJavaScript(SWITCH_SCENARIO);
-	await wait(850); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)
+	// rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더. 완료(S2 + 1행)까지 폴링.
+	await waitFor(`(function(){ return window.currentScreenId(window.activeTab())==='S2' && document.querySelectorAll('#annot-list .doc-row').length===1; })()`);
 	const r1b = await wc.executeJavaScript(AFTER_SWITCH);
 	check('화면 전환(S2) 시 현재 화면 인식', r1b.curScreen === 'S2', 'curScreen=' + r1b.curScreen);
 	check('화면 전환 후 표 재렌더 = S2 핀 1행', r1b.rows === 1, 'rows=' + r1b.rows);
@@ -214,7 +230,7 @@ app.whenReady().then(async () => {
 	console.log('== WS-C 화면 네비·편집 필터 ==');
 	// rz 에서 편집 모드로 전환됨. dd 화면 네비 첫 행(S1) 클릭 → gotoScreen 브리지 → 편집 패널이 S1 주석만(이슈 2).
 	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[0]) rows[0].click(); return true; })()`);
-	await wait(850);
+	await waitFor(`(function(){ return window.currentScreenId(window.activeTab())==='S1' && document.querySelectorAll('#annot-list .annot-row').length===2; })()`);
 	const nc = await wc.executeJavaScript(`(function(){ return {
 		nav: document.querySelectorAll('#screen-list .screen-row').length,
 		badge: (document.querySelector('#screen-list .screen-row .screen-count')||{}).textContent,
@@ -225,7 +241,7 @@ app.whenReady().then(async () => {
 	check('화면별 주석 개수 배지(S1=2)', nc.badge === '2', 'badge=' + nc.badge);
 	check('편집 모드 S1 화면 필터 = 2행', nc.editRows === 2 && nc.cur === 'S1', 'rows=' + nc.editRows + ' cur=' + nc.cur);
 	await wc.executeJavaScript(`(function(){ var rows=document.querySelectorAll('#screen-list .screen-row'); if(rows[1]) rows[1].click(); return true; })()`);
-	await wait(850);
+	await waitFor(`(function(){ return window.currentScreenId(window.activeTab())==='S2' && document.querySelectorAll('#annot-list .annot-row').length===1; })()`);
 	const nc2 = await wc.executeJavaScript(`(function(){ return { editRows: document.querySelectorAll('#annot-list .annot-row').length, cur: window.currentScreenId(window.activeTab()) }; })()`);
 	check('편집 모드 화면 전환(S2) → 필터 1행 (이슈 2 해결)', nc2.editRows === 1 && nc2.cur === 'S2', 'rows=' + nc2.editRows + ' cur=' + nc2.cur);
 
@@ -324,11 +340,11 @@ app.whenReady().then(async () => {
 	check('둘째 핀도 screenSel=#pg-0 (screenId 오저장 버그 수정)', s1.sel1 === '#pg-0' && !s1.sid1, 'sel1=' + s1.sel1 + ' sid1=' + s1.sid1);
 	check('화면0에서 핀 2개 표시', s1.visible === 2, 'visible=' + s1.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(1); return true; })()`);
-	await wait(850);
+	await waitFor(`(function(){ return window.activeTab().overlay.stats().visible===0; })()`); // 화면0 핀 게이팅 완료까지
 	const s2 = await wc.executeJavaScript(`(function(){ return { visible:window.activeTab().overlay.stats().visible }; })()`);
 	check('화면1 전환 → 화면0 핀 2개 모두 숨김 = 0 (둘째 핀도 게이팅됨)', s2.visible === 0, 'visible=' + s2.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(0); return true; })()`);
-	await wait(850);
+	await waitFor(`(function(){ return window.activeTab().overlay.stats().visible===2; })()`); // 화면0 복귀·핀 복원까지
 	const s3 = await wc.executeJavaScript(`(function(){ var tab=window.activeTab(); return { visible:tab.overlay.stats().visible, cur:window.currentScreenId(tab) }; })()`);
 	check('화면0 복귀 → 핀 2개 복원 = 2', s3.visible === 2, 'visible=' + s3.visible);
 	check('generic 현재화면 감지 = #pg-0', s3.cur === '#pg-0', 'cur=' + s3.cur);
@@ -352,6 +368,81 @@ app.whenReady().then(async () => {
 	})()`);
 	check('롱스크롤 핀 = coord 앵커(빈 곳)', ls.mode === 'coord', 'mode=' + ls.mode);
 	check('스크롤 시 핀이 콘텐츠 따라 이동(≈600px 위로)', ls.delta >= 550 && ls.delta <= 650, 'delta=' + ls.delta);
+
+	console.log('== 화살표 이동 (전체·끝점·미세이동) ==');
+	// spec-html 목업 재로딩 — 두 data-element-id 요소 사이에 화살표를 그리고 이동을 검사한다.
+	await wc.executeJavaScript(`(async function(){ window.alert=function(){};window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(specPath)}, {history:false}); return true; })()`);
+	await wait(700);
+	// [생성] 요소 A→B 로 화살표 드래그(도구 arrow). e.target=doc → 좌표 히트테스트로 양끝 요소 앵커.
+	const av = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); window.toggleEdit();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		function ev(t,x,y){ doc.dispatchEvent(new win.MouseEvent(t,{clientX:x,clientY:y,button:0,bubbles:true})); }
+		tab.overlay.setTool('arrow');
+		var e1=doc.querySelector('[data-element-id="S1-EL-001"]').getBoundingClientRect();
+		var e2=doc.querySelector('[data-element-id="S1-EL-002"]').getBoundingClientRect();
+		var x1=Math.round(e1.left+e1.width/2), y1=Math.round(e1.top+e1.height/2);
+		var x2=Math.round(e2.left+e2.width/2), y2=Math.round(e2.top+e2.height/2);
+		ev('mousedown',x1,y1); ev('mousemove',x2,y2); ev('mouseup',x2,y2);
+		tab.overlay.setTool('annot');
+		var arrow=tab.annotations.annotations.filter(function(a){return a.type==='arrow';})[0];
+		window.__arrowId = arrow ? arrow.id : null;
+		return { has:!!arrow, m1:arrow&&arrow.anchor&&arrow.anchor.mode, m2:arrow&&arrow.anchor2&&arrow.anchor2.mode,
+			id1:arrow&&arrow.anchor&&arrow.anchor.elementId, id2:arrow&&arrow.anchor2&&arrow.anchor2.elementId };
+	})()`);
+	check('화살표 생성됨(type=arrow)', av.has === true);
+	check('시작점 요소 앵커(S1-EL-001)', av.m1 === 'element' && av.id1 === 'S1-EL-001', 'm1=' + av.m1 + ' id1=' + av.id1);
+	check('끝점 요소 앵커(S1-EL-002)', av.m2 === 'element' && av.id2 === 'S1-EL-002', 'm2=' + av.m2 + ' id2=' + av.id2);
+	// [전체 이동] 몸통(hit line) 잡고 아래 빈 공간으로 → 양끝 함께 이동·재앵커(coord).
+	const aw = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var arrow=tab.annotations.annotations.find(function(a){return a.id===window.__arrowId;});
+		var before=JSON.stringify({a:arrow.anchor,c:arrow.coord,a2:arrow.anchor2,c2:arrow.coord2});
+		tab.overlay.select(arrow.id);
+		var hit=doc.querySelector('#dd-overlay-root .dd-arrow .dd-arrow-hit');
+		hit.dispatchEvent(new win.MouseEvent('mousedown',{clientX:100,clientY:100,button:0,bubbles:true})); // 몸통=e.target
+		doc.dispatchEvent(new win.MouseEvent('mousemove',{clientX:100,clientY:360,button:0,bubbles:true}));  // +260 아래
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:100,clientY:360,button:0,bubbles:true}));
+		var after=JSON.stringify({a:arrow.anchor,c:arrow.coord,a2:arrow.anchor2,c2:arrow.coord2});
+		return { changed:before!==after, m1:arrow.anchor&&arrow.anchor.mode, m2:arrow.anchor2&&arrow.anchor2.mode };
+	})()`);
+	check('전체 이동 — 양끝 앵커 갱신됨', aw.changed === true);
+	check('전체 이동 — 빈 공간 낙하 → 양끝 coord', aw.m1 === 'coord' && aw.m2 === 'coord', 'm1=' + aw.m1 + ' m2=' + aw.m2);
+	// [끝점 이동] 끝점 핸들[1] 잡고 이동 → 잡은 끝만 재앵커, 반대 끝 불변.
+	const ae = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var arrow=tab.annotations.annotations.find(function(a){return a.id===window.__arrowId;});
+		var end1Before=JSON.stringify({a:arrow.anchor,c:arrow.coord});
+		var end2Before=JSON.stringify({a2:arrow.anchor2,c2:arrow.coord2});
+		tab.overlay.select(arrow.id);
+		var handles=doc.querySelectorAll('#dd-overlay-root .dd-arrow .dd-arrow-handle');
+		handles[1].dispatchEvent(new win.MouseEvent('mousedown',{clientX:100,clientY:100,button:0,bubbles:true})); // 끝점 핸들=e.target
+		doc.dispatchEvent(new win.MouseEvent('mousemove',{clientX:170,clientY:150,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:170,clientY:150,button:0,bubbles:true}));
+		return { handles:handles.length,
+			end1Same: end1Before===JSON.stringify({a:arrow.anchor,c:arrow.coord}),
+			end2Changed: end2Before!==JSON.stringify({a2:arrow.anchor2,c2:arrow.coord2}) };
+	})()`);
+	check('끝점 핸들 2개 존재', ae.handles === 2, 'handles=' + ae.handles);
+	check('한 끝점 이동 — 반대 끝(시작점) 불변', ae.end1Same === true);
+	check('한 끝점 이동 — 잡은 끝만 갱신', ae.end2Changed === true);
+	// [미세이동] 방향키(nudgeSelected) — 양끝 평행이동·길이 유지(점 붕괴 회귀 가드).
+	const an = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument;
+		var arrow=tab.annotations.annotations.find(function(a){return a.id===window.__arrowId;});
+		tab.overlay.select(arrow.id);
+		var before=JSON.stringify({a:arrow.anchor,c:arrow.coord,a2:arrow.anchor2,c2:arrow.coord2});
+		tab.overlay.nudgeSelected(10,0);
+		var vis=doc.querySelector('#dd-overlay-root .dd-arrow .dd-arrow-line');
+		var len=Math.hypot(vis.getAttribute('x2')-vis.getAttribute('x1'), vis.getAttribute('y2')-vis.getAttribute('y1'));
+		var after=JSON.stringify({a:arrow.anchor,c:arrow.coord,a2:arrow.anchor2,c2:arrow.coord2});
+		return { changed:before!==after, len:Math.round(len) };
+	})()`);
+	check('방향키 미세이동 — 앵커 갱신', an.changed === true);
+	check('미세이동 후 길이 유지(점 붕괴 아님)', an.len > 20, 'len=' + an.len);
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);

@@ -78,6 +78,9 @@ body:has(#${ROOT_ID}.dd-tool-text) { cursor: text !important; }
 body:has(#${ROOT_ID}.dd-tool-arrow) { cursor: crosshair !important; }
 #${ROOT_ID} .dd-arrow { position: absolute; }
 #${ROOT_ID} .dd-arrow.dd-selected .dd-arrow-line { stroke-width: 4; } /* 화살표 선택 강조 */
+#${ROOT_ID}.dd-editing .dd-arrow .dd-arrow-hit { cursor: move; } /* 편집 모드 — 몸통 잡아 전체 이동 */
+#${ROOT_ID} .dd-arrow-handle { display: none; fill: #fff; stroke: #7460D9; stroke-width: 2; pointer-events: all; cursor: grab; } /* 끝점 핸들 — 선택 시만 */
+#${ROOT_ID} .dd-arrow.dd-selected .dd-arrow-handle { display: inline; } /* 선택된 화살표의 두 끝점 노출 */
 #${ROOT_ID} .dd-box.dd-ellipse { border-radius: 50%; } /* 원(타원) 도형 */
 #${ROOT_ID} .dd-rubber.dd-rubber-ellipse { border-radius: 50%; } /* 원 그리기 미리보기 */
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
@@ -286,7 +289,10 @@ body.clean #screen-nav { display: none !important; }
 				marker.appendChild(head); defs.appendChild(marker); el.appendChild(defs);
 				const hitL = doc.createElementNS(SVGNS, 'line'); hitL.setAttribute('class', 'dd-arrow-hit'); hitL.setAttribute('stroke', 'transparent'); hitL.setAttribute('stroke-width', '14'); hitL.style.pointerEvents = 'stroke'; hitL.style.cursor = 'pointer';
 				const visL = doc.createElementNS(SVGNS, 'line'); visL.setAttribute('class', 'dd-arrow-line'); visL.setAttribute('stroke', col); visL.setAttribute('stroke-width', '2.5'); visL.setAttribute('marker-end', 'url(#' + mid + ')'); visL.style.pointerEvents = 'none';
-				el.appendChild(hitL); el.appendChild(visL);
+				// 끝점 핸들 — 선택 시 노출(CSS), 각각 잡아서 한 끝만 재앵커. dataset.ddEnd 로 시작/끝 구분.
+				const h1 = doc.createElementNS(SVGNS, 'circle'); h1.setAttribute('class', 'dd-arrow-handle'); h1.setAttribute('r', '6'); h1.dataset.ddEnd = '1';
+				const h2 = doc.createElementNS(SVGNS, 'circle'); h2.setAttribute('class', 'dd-arrow-handle'); h2.setAttribute('r', '6'); h2.dataset.ddEnd = '2';
+				el.appendChild(hitL); el.appendChild(visL); el.appendChild(h1); el.appendChild(h2);
 			} else {
 				el = doc.createElement('div');
 				el.className = 'dd-pin';
@@ -373,6 +379,9 @@ body.clean #screen-nav { display: none !important; }
 			node.style.width = rootRect.width + 'px'; node.style.height = rootRect.height + 'px';
 			const x1 = p1.x - rootRect.left, y1 = p1.y - rootRect.top, x2 = p2.x - rootRect.left, y2 = p2.y - rootRect.top;
 			node.querySelectorAll('line').forEach((l) => { l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2); });
+			const hs = node.querySelectorAll('.dd-arrow-handle');
+			if (hs[0]) { hs[0].setAttribute('cx', x1); hs[0].setAttribute('cy', y1); }
+			if (hs[1]) { hs[1].setAttribute('cx', x2); hs[1].setAttribute('cy', y2); }
 			return true;
 		}
 
@@ -621,6 +630,14 @@ body.clean #screen-nav { display: none !important; }
 			if (!a) return;
 			const node = nodes.get(a.id);
 			if (!node || node.style.display === 'none') return;
+			if (a.type === 'arrow') { // 화살표 — 두 끝점 함께 평행이동(중심 붕괴 방지)
+				const p1 = pointOf(a.anchor, a.coord), p2 = pointOf(a.anchor2, a.coord2);
+				if (!p1 || !p2) return;
+				const h1 = pinAnchorAt(p1.x + dx, p1.y + dy), h2 = pinAnchorAt(p2.x + dx, p2.y + dy);
+				a.anchor = h1.anchor; a.coord = h1.coord; a.anchor2 = h2.anchor; a.coord2 = h2.coord;
+				layout(); notifyChange();
+				return;
+			}
 			const r = node.getBoundingClientRect();
 			if (a.type === 'box') {
 				const hit = boxAnchorFor({ left: r.left + dx, top: r.top + dy, width: r.width, height: r.height });
@@ -671,7 +688,19 @@ body.clean #screen-nav { display: none !important; }
 				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
 				if (!a) return;
 				select(a.id);
-				if (a.type === 'arrow') { gesture = null; dragNodeId = null; return; } // 화살표는 선택만(이동은 재그리기 — MVP)
+				if (a.type === 'arrow') { // 화살표 — 몸통 잡으면 전체 이동, 끝점 핸들 잡으면 그 끝만 재앵커
+					const p1 = pointOf(a.anchor, a.coord);
+					const p2 = pointOf(a.anchor2, a.coord2);
+					if (!p1 || !p2) { gesture = null; dragNodeId = null; return; } // 해석 불가(양끝 없음)면 선택만
+					const handle = e.target && e.target.closest ? e.target.closest('.dd-arrow-handle') : null;
+					gesture = {
+						kind: 'arrow', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
+						end: handle ? handle.dataset.ddEnd : null, // '1'|'2' 단일 끝점 / null 전체 이동
+						p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, // 드래그 시작 시점의 viewport 끝점
+					};
+					dragNodeId = a.id;
+					return;
+				}
 				const nr = ddEl.getBoundingClientRect();
 				gesture = {
 					kind: 'move', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
@@ -690,6 +719,17 @@ body.clean #screen-nav { display: none !important; }
 			if (!gesture.moved && Math.abs(dx) < DRAG_MIN && Math.abs(dy) < DRAG_MIN) return;
 			gesture.moved = true;
 			const rootRect = root.getBoundingClientRect();
+			if (gesture.kind === 'arrow') { // 화살표 이동 — 몸통(양끝) 또는 한 끝만 델타 적용
+				const g = gesture;
+				const m1 = (g.end === '2') ? 0 : 1, m2 = (g.end === '1') ? 0 : 1; // 이동 대상 끝점 마스크
+				const nx1 = g.p1.x - rootRect.left + dx * m1, ny1 = g.p1.y - rootRect.top + dy * m1;
+				const nx2 = g.p2.x - rootRect.left + dx * m2, ny2 = g.p2.y - rootRect.top + dy * m2;
+				g.node.querySelectorAll('line').forEach((l) => { l.setAttribute('x1', nx1); l.setAttribute('y1', ny1); l.setAttribute('x2', nx2); l.setAttribute('y2', ny2); });
+				const hs = g.node.querySelectorAll('.dd-arrow-handle');
+				if (hs[0]) { hs[0].setAttribute('cx', nx1); hs[0].setAttribute('cy', ny1); }
+				if (hs[1]) { hs[1].setAttribute('cx', nx2); hs[1].setAttribute('cy', ny2); }
+				return;
+			}
 			if (gesture.kind === 'move') {
 				const isPin = gesture.node.classList.contains('dd-pin');
 				// 핀은 translate(-50%,-50%) 라 중심 기준, 박스는 좌상단 기준으로 되적용
@@ -738,6 +778,19 @@ body.clean #screen-nav { display: none !important; }
 				g.node.classList.remove('dd-will-element', 'dd-will-coord'); // 드래그 힌트 해제
 				if (g.moved) reanchor(g.a, g.node);
 				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
+			}
+			if (g.kind === 'arrow') { // 화살표 드롭 — 이동한 끝점만 새 위치에서 재판정(요소↔좌표 자동)
+				if (g.moved) {
+					const ddx = e.clientX - g.sx, ddy = e.clientY - g.sy;
+					const m1 = (g.end === '2') ? 0 : 1, m2 = (g.end === '1') ? 0 : 1;
+					const h1 = pinAnchorAt(g.p1.x + ddx * m1, g.p1.y + ddy * m1);
+					const h2 = pinAnchorAt(g.p2.x + ddx * m2, g.p2.y + ddy * m2);
+					g.a.anchor = h1.anchor; g.a.coord = h1.coord;
+					g.a.anchor2 = h2.anchor; g.a.coord2 = h2.coord;
+					layout();
+					notifyChange();
+				}
+				return; // 미이동 = 선택만
 			}
 			if (g.arrowPrev) g.arrowPrev.svg.remove();
 			if (g.rubber) g.rubber.remove();
