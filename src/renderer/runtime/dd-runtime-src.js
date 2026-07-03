@@ -32,6 +32,8 @@
 }
 #dd-overlay-root .dd-pin.dd-active, #dd-overlay-root .dd-box.dd-active, #dd-overlay-root .dd-text.dd-active { outline: 3px solid rgba(116,96,217,.5); outline-offset: 2px; }
 #dd-overlay-root .dd-text { position: absolute; transform: none; max-width: 240px; padding: 4px 8px; box-sizing: border-box; background: rgba(255,255,255,.94); color: #1f2328; border: 1px solid #7460D9; border-radius: 6px; font: 600 12px/1.45 Pretendard, -apple-system, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.2); white-space: pre-wrap; word-break: break-word; pointer-events: auto; cursor: pointer; }
+#dd-overlay-root .dd-arrow { position: absolute; }
+#dd-overlay-root .dd-arrow.dd-active .dd-arrow-line { stroke-width: 4; }
 #dd-overlay-root .dd-pin.dd-st-new { background: #18a558; }
 #dd-overlay-root .dd-pin.dd-st-modified { background: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
@@ -159,6 +161,25 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		function coordRect(c, b) {
 			return { left: b.left + c.x * b.width, top: b.top + c.y * b.height, width: (c.w || 0) * b.width, height: (c.h || 0) * b.height };
 		}
+		// 포인트 앵커 → 절대 점 {x,y} (화살표 끝점용). 해석 불가면 null.
+		function ptOf(anchor, coord) {
+			if (anchor && anchor.mode === 'element') {
+				var t = queryEl(anchor.elementId);
+				if (!renderable(t)) return null;
+				var r = t.getBoundingClientRect();
+				var p = pinPoint({ left: r.left, top: r.top, width: r.width, height: r.height }, anchor.offsetPct);
+				return { x: p.left, y: p.top };
+			}
+			if (coord) {
+				var base = basisEl(coord.basis);
+				if (renderable(base) || base === doc.body) {
+					var br = base.getBoundingClientRect();
+					var p2 = coordRect(coord, { left: br.left, top: br.top, width: br.width, height: br.height });
+					return { x: p2.left, y: p2.top };
+				}
+			}
+			return null;
+		}
 		function esc(id) {
 			return (win.CSS && win.CSS.escape) ? win.CSS.escape(id) : String(id).replace(/["\\]/g, '\\$&');
 		}
@@ -217,6 +238,22 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 						el.textContent = (a.body && a.body.plain) || '';
 						el.setAttribute('data-dd-id', a.id);
 						if (a.body && a.body.plain) el.title = a.body.plain;
+						el.style.display = 'none';
+						el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
+						root.appendChild(el); nodes[a.id] = el;
+						return;
+					}
+					if (a.type === 'arrow') { // 화살표 — root 전체 SVG + 라인/화살촉(읽기전용)
+						var SVGNS = 'http://www.w3.org/2000/svg';
+						el = doc.createElementNS(SVGNS, 'svg'); el.setAttribute('class', 'dd-arrow');
+						el.style.position = 'absolute'; el.style.left = '0'; el.style.top = '0'; el.style.overflow = 'visible'; el.style.pointerEvents = 'none';
+						el.setAttribute('data-dd-id', a.id);
+						var acol = (a.style && a.style.color) || '#7460D9', amid = 'ah-' + a.id;
+						var adefs = doc.createElementNS(SVGNS, 'defs'), amk = doc.createElementNS(SVGNS, 'marker');
+						amk.setAttribute('id', amid); amk.setAttribute('markerWidth', '10'); amk.setAttribute('markerHeight', '8'); amk.setAttribute('refX', '7'); amk.setAttribute('refY', '3'); amk.setAttribute('orient', 'auto'); amk.setAttribute('markerUnits', 'userSpaceOnUse');
+						var ahd = doc.createElementNS(SVGNS, 'path'); ahd.setAttribute('d', 'M0,0 L8,3 L0,6 Z'); ahd.setAttribute('fill', acol); amk.appendChild(ahd); adefs.appendChild(amk); el.appendChild(adefs);
+						var aln = doc.createElementNS(SVGNS, 'line'); aln.setAttribute('class', 'dd-arrow-line'); aln.setAttribute('stroke', acol); aln.setAttribute('stroke-width', '2.5'); aln.setAttribute('marker-end', 'url(#' + amid + ')'); aln.style.pointerEvents = 'stroke'; aln.style.cursor = 'pointer';
+						el.appendChild(aln);
 						el.style.display = 'none';
 						el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
 						root.appendChild(el); nodes[a.id] = el;
@@ -300,7 +337,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
 					var lst = annStatus(a);
-					var isT = a.type === 'text'; // 텍스트 = 번호·배지 없음
+					var isT = a.type === 'text' || a.type === 'arrow'; // 텍스트·화살표 = 번호·배지 없음
 					// 색 SSOT 정합 — 신규 배지는 차수색(statusCol)을 핀과 동일하게 인라인(저장본 배경=흰색). 수정은 클래스 유지.
 					var lbadge = '';
 					if (!isT && lst === 'new') { var bc = statusCol(a); lbadge = '<span class="dd-p-badge dd-b-new" style="color:' + bc + ';background:color-mix(in srgb,' + bc + ' 18%,#fff)">' + annBadgeLabel(a) + '</span>'; }
@@ -308,7 +345,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 					var lgc = isGrp(a) ? groupCol(grpKey(a)) : null; // 그룹색(1-A/1-B)
 					var numStyle = lgc ? ' style="background:' + lgc + ';color:#fff"' : '';
 					var lcap = (a.mark && (a.mark.addedAt || a.mark.reason)) ? '<div class="dd-p-mark" style="color:' + statusCol(a) + '">' + escHtml(annTip(a)) + '</div>' : ''; // 날짜·사유
-					li.innerHTML = '<span class="dd-p-num' + (isT ? ' is-text' : '') + '"' + (isT ? '' : numStyle) + '>' + (isT ? 'T' : a.label) + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + lcap + '</div>';
+					li.innerHTML = '<span class="dd-p-num' + (isT ? ' is-text' : '') + '"' + (isT ? '' : numStyle) + '>' + (a.type === 'text' ? 'T' : a.type === 'arrow' ? '↗' : a.label) + '</span>' + lbadge + '<div class="dd-p-body">' + slotHtml(a) + lcap + '</div>';
 					if (lgc) li.style.borderLeft = '3px solid ' + lgc;
 					if (a.parentId) li.style.paddingLeft = '18px';
 					li.addEventListener('click', function () { selectAnn(a.id); });
@@ -347,6 +384,15 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 				var gated = false;
 				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true;
 				else if (a.anchor && a.anchor.screenSel && !renderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic 화면 컨테이너 숨김
+				if (a.type === 'arrow') { // 화살표 — 두 끝점 라인(별도 배치)
+					var ap1 = gated ? null : ptOf(a.anchor, a.coord), ap2 = gated ? null : ptOf(a.anchor2, a.coord2);
+					if (!ap1 || !ap2) { node.style.display = 'none'; continue; }
+					node.style.display = ''; node.setAttribute('width', rootRect.width); node.setAttribute('height', rootRect.height);
+					node.style.width = rootRect.width + 'px'; node.style.height = rootRect.height + 'px';
+					var lns = node.getElementsByTagName('line');
+					for (var li = 0; li < lns.length; li++) { lns[li].setAttribute('x1', ap1.x - rootRect.left); lns[li].setAttribute('y1', ap1.y - rootRect.top); lns[li].setAttribute('x2', ap2.x - rootRect.left); lns[li].setAttribute('y2', ap2.y - rootRect.top); }
+					continue;
+				}
 				if (gated) {
 					abs = null;
 				} else if (a.anchor && a.anchor.mode === 'element') {

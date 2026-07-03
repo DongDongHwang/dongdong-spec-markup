@@ -23,17 +23,20 @@ const apImportNote = document.getElementById('ap-import-note');
 const apTools = document.getElementById('ap-tools');
 const toolAnnotBtn = document.getElementById('tool-annot');
 const toolTextBtn = document.getElementById('tool-text');
-// 편집 도구 — 'annot'(핀·박스) | 'text'(캔버스 텍스트). 오버레이에 전달.
+const toolArrowBtn = document.getElementById('tool-arrow');
+// 편집 도구 — 'annot'(핀·박스) | 'text'(캔버스 텍스트) | 'arrow'(화살표). 오버레이에 전달.
 let activeTool = 'annot';
 function setTool(name) {
-	activeTool = name === 'text' ? 'text' : 'annot';
+	activeTool = (name === 'text' || name === 'arrow') ? name : 'annot';
 	const tab = activeTab();
 	if (tab && tab.overlay) tab.overlay.setTool(activeTool);
 	if (toolAnnotBtn) toolAnnotBtn.classList.toggle('is-on', activeTool === 'annot');
 	if (toolTextBtn) toolTextBtn.classList.toggle('is-on', activeTool === 'text');
+	if (toolArrowBtn) toolArrowBtn.classList.toggle('is-on', activeTool === 'arrow');
 }
 if (toolAnnotBtn) toolAnnotBtn.addEventListener('click', () => setTool('annot'));
 if (toolTextBtn) toolTextBtn.addEventListener('click', () => setTool('text'));
+if (toolArrowBtn) toolArrowBtn.addEventListener('click', () => setTool('arrow'));
 const apDetail = document.getElementById('ap-detail');
 const apdLabel = document.getElementById('apd-label');
 const apdName = document.getElementById('apd-name');
@@ -784,7 +787,9 @@ if (splitBtn) splitBtn.addEventListener('click', splitActive);
 // 드래그 = 재정렬(중간 삽입 밀기) / 자동 배지 클릭 = 수동↔자동 전환 / × = 삭제(당김 옵션).
 let dragAnnotId = null; // 행 드래그 재정렬 중인 주석 id
 
-function annotTypeIcon(a) { return a.type === 'box' ? '▭' : a.type === 'text' ? '🅣' : '📍'; }
+function annotTypeIcon(a) { return a.type === 'box' ? '▭' : a.type === 'text' ? '🅣' : a.type === 'arrow' ? '↗' : '📍'; }
+// 무번호 타입(텍스트·화살표) 목록/문서뷰 마커
+function noNumMark(a) { return a.type === 'text' ? 'T' : a.type === 'arrow' ? '↗' : null; }
 
 // diff 배지 — 신규(manual 직접)/수정(draft 편집됨). 기존(draft 미편집)은 배지 없음. 목록·문서 뷰 공용.
 function statusBadgeEl(a) {
@@ -838,10 +843,10 @@ function renderAnnotPanel() {
 		li.dataset.annotId = a.id;
 		li.draggable = true;
 		const label = document.createElement('span');
-		const isTextRow = a.type === 'text';
-		label.className = 'annot-label' + (a.autoNumber ? '' : ' is-manual') + (isTextRow ? ' is-text' : '');
-		label.textContent = isTextRow ? 'T' : a.label;
-		label.title = isTextRow ? '텍스트(번호 없음)' : (a.autoNumber ? '자동 번호 — 더블클릭으로 직접 수정(수동 고정)' : '수동 번호 — 더블클릭 수정');
+		const mk = noNumMark(a); // 텍스트=T·화살표=↗ (번호 없음)
+		label.className = 'annot-label' + (a.autoNumber ? '' : ' is-manual') + (mk ? ' is-text' : '');
+		label.textContent = mk || a.label;
+		label.title = mk ? (a.type === 'text' ? '텍스트(번호 없음)' : '화살표(번호 없음)') : (a.autoNumber ? '자동 번호 — 더블클릭으로 직접 수정(수동 고정)' : '수동 번호 — 더블클릭 수정');
 		const type = document.createElement('span');
 		type.className = 'annot-type';
 		type.textContent = annotTypeIcon(a);
@@ -1024,8 +1029,9 @@ function renderDocPanel(tab) {
 		li.className = 'doc-row';
 		li.dataset.annotId = a.id;
 		const num = document.createElement('span');
-		num.className = 'doc-num' + (a.type === 'text' ? ' is-text' : '');
-		num.textContent = a.type === 'text' ? 'T' : a.label;
+		const mk = noNumMark(a);
+		num.className = 'doc-num' + (mk ? ' is-text' : '');
+		num.textContent = mk || a.label;
 		const body = document.createElement('div');
 		body.className = 'doc-body';
 		body.innerHTML = docBodyHtml(a);
@@ -1143,20 +1149,20 @@ function renderDetail() {
 	if (!tab || !tab.editMode) { apDetail.classList.add('hidden'); return; } // 읽기 모드 = 편집기 절대 미노출(읽기의 마지막 방어선)
 	if (!ann) { apDetail.classList.add('hidden'); return; }
 	apDetail.classList.remove('hidden');
-	const isText = ann.type === 'text';
-	// 텍스트는 마킹·묶음·슬롯 없음 — 자유 편집기만.
+	const isTextLike = ann.type === 'text' || ann.type === 'arrow';
+	// 텍스트·화살표는 마킹·묶음·슬롯 없음 — 자유 편집기(내용/메모)만.
 	const markEl = document.getElementById('apd-mark');
 	const parentEl = document.getElementById('apd-parent');
-	if (markEl) markEl.classList.toggle('hidden', isText);
-	if (parentEl) parentEl.classList.toggle('hidden', isText);
-	if (apdSlotsBtn) apdSlotsBtn.classList.toggle('hidden', isText);
-	apdLabel.textContent = isText ? 'T' : ann.label;
-	apdName.textContent = isText ? '텍스트' : (ann.type === 'box' ? '범위 설명' : '핀 설명');
-	if (isText) {
+	if (markEl) markEl.classList.toggle('hidden', isTextLike);
+	if (parentEl) parentEl.classList.toggle('hidden', isTextLike);
+	if (apdSlotsBtn) apdSlotsBtn.classList.toggle('hidden', isTextLike);
+	apdLabel.textContent = ann.type === 'text' ? 'T' : ann.type === 'arrow' ? '↗' : ann.label;
+	apdName.textContent = ann.type === 'text' ? '텍스트' : ann.type === 'arrow' ? '화살표' : (ann.type === 'box' ? '범위 설명' : '핀 설명');
+	if (isTextLike) {
 		apdSlotMode = false;
 		apdSlots.classList.add('hidden');
 		apdEditor.classList.remove('hidden');
-		apdEditor.setAttribute('data-placeholder', '텍스트 내용을 입력하세요…');
+		apdEditor.setAttribute('data-placeholder', ann.type === 'arrow' ? '화살표 메모(선택)…' : '텍스트 내용을 입력하세요…');
 		if (document.activeElement !== apdEditor) apdEditor.innerHTML = (ann.body && ann.body.html) || '';
 		return;
 	}

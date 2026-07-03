@@ -30,10 +30,11 @@
 		const isTop = (a) => !a.parentId || !byId[a.parentId];
 		const sorted = sortedBySeq(set);
 		let top = 0;
-		sorted.forEach((a) => { if (a.type === 'text') return; if (isTop(a)) { top++; if (a.autoNumber) a.label = String(top); } }); // 텍스트는 번호 시퀀스 제외
+		const noNum = (a) => a.type === 'text' || a.type === 'arrow'; // 번호 없는 타입(시퀀스·계층 제외)
+		sorted.forEach((a) => { if (noNum(a)) return; if (isTop(a)) { top++; if (a.autoNumber) a.label = String(top); } });
 		const childCount = {};
 		sorted.forEach((a) => {
-			if (a.type === 'text') return; // 텍스트는 계층·번호 없음
+			if (noNum(a)) return;
 			if (isTop(a) || !a.autoNumber) return;
 			const parent = byId[a.parentId];
 			const prefix = parent ? parent.label : '?';

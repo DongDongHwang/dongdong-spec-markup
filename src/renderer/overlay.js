@@ -14,6 +14,7 @@ const DDOverlay = (() => {
 	const ROOT_ID = 'dd-overlay-root';
 	const STYLE_ID = 'dd-overlay-style';
 	const DRAG_MIN = 5; // px — 이 미만 이동은 클릭으로 본다
+	const SVGNS = 'http://www.w3.org/2000/svg'; // 화살표(arrow) SVG 렌더
 
 	// 오버레이 CSS — 전부 dd- prefix (목업 무오염). M5 저장 런타임에서도 그대로 재사용할 수 있게 한 덩어리로 유지.
 	const OVERLAY_CSS = `
@@ -74,6 +75,9 @@ const DDOverlay = (() => {
 #${ROOT_ID} .dd-text:empty::before { content: '텍스트'; color: #9aa0a6; } /* 빈 텍스트 placeholder */
 #${ROOT_ID} .dd-text.dd-editing-text { cursor: text; outline: 2px solid #7460D9; outline-offset: 1px; background: #fff; min-width: 40px; } /* 인라인 편집 중 */
 body:has(#${ROOT_ID}.dd-tool-text) { cursor: text !important; }
+body:has(#${ROOT_ID}.dd-tool-arrow) { cursor: crosshair !important; }
+#${ROOT_ID} .dd-arrow { position: absolute; }
+#${ROOT_ID} .dd-arrow.dd-selected .dd-arrow-line { stroke-width: 4; } /* 화살표 선택 강조 */
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
@@ -265,6 +269,22 @@ body.clean #screen-nav { display: none !important; }
 					a.body = { format: 'html', html: el.innerHTML, plain: el.textContent || '' };
 					notifyChange();
 				});
+			} else if (a.type === 'arrow') {
+				// 화살표 — root 전체 크기 SVG. 두 끝점 사이 라인 + 화살촉. 히트 라인(투명·굵음)으로 클릭 용이.
+				el = doc.createElementNS(SVGNS, 'svg');
+				el.setAttribute('class', 'dd-arrow');
+				el.style.position = 'absolute'; el.style.left = '0'; el.style.top = '0'; el.style.overflow = 'visible'; el.style.pointerEvents = 'none';
+				const col = (a.style && a.style.color) || '#7460D9';
+				const mid = 'ah-' + a.id;
+				const defs = doc.createElementNS(SVGNS, 'defs');
+				const marker = doc.createElementNS(SVGNS, 'marker');
+				marker.setAttribute('id', mid); marker.setAttribute('markerWidth', '10'); marker.setAttribute('markerHeight', '8');
+				marker.setAttribute('refX', '7'); marker.setAttribute('refY', '3'); marker.setAttribute('orient', 'auto'); marker.setAttribute('markerUnits', 'userSpaceOnUse');
+				const head = doc.createElementNS(SVGNS, 'path'); head.setAttribute('d', 'M0,0 L8,3 L0,6 Z'); head.setAttribute('fill', col);
+				marker.appendChild(head); defs.appendChild(marker); el.appendChild(defs);
+				const hitL = doc.createElementNS(SVGNS, 'line'); hitL.setAttribute('class', 'dd-arrow-hit'); hitL.setAttribute('stroke', 'transparent'); hitL.setAttribute('stroke-width', '14'); hitL.style.pointerEvents = 'stroke'; hitL.style.cursor = 'pointer';
+				const visL = doc.createElementNS(SVGNS, 'line'); visL.setAttribute('class', 'dd-arrow-line'); visL.setAttribute('stroke', col); visL.setAttribute('stroke-width', '2.5'); visL.setAttribute('marker-end', 'url(#' + mid + ')'); visL.style.pointerEvents = 'none';
+				el.appendChild(hitL); el.appendChild(visL);
 			} else {
 				el = doc.createElement('div');
 				el.className = 'dd-pin';
@@ -272,7 +292,7 @@ body.clean #screen-nav { display: none !important; }
 			}
 			el.dataset.ddId = a.id;
 			const plain = a.body && a.body.plain;
-			if (a.type !== 'text') { // 배지·색·차수·날짜는 번호 주석(pin/box)만
+			if (a.type !== 'text' && a.type !== 'arrow') { // 배지·색·차수·날짜는 번호 주석(pin/box)만
 				const badge = DDModel.annotBadge(a); // { status, label, tooltip } — 사용자 마킹 우선, 없으면 origin 폴백
 				el.classList.add('dd-st-' + badge.status);
 				applyPinColor(el, a); // 색 SSOT(인라인) — 신규 차수색·수정 주황·기존 현행·그룹 ring
@@ -322,6 +342,38 @@ body.clean #screen-nav { display: none !important; }
 		let lastScreen; // 직전 layout 의 현재 화면 — 바뀌면 onScreenChange 통지(문서 뷰 우측 표 갱신용)
 		let dragNodeId = null; // 드래그 중 노드 — layout 이 위치를 되돌리지 않게 스킵
 
+		// 포인트 앵커(element offsetPct 또는 coord) → viewport 절대 점 { x, y }. 해석 불가면 null.
+		function pointOf(anchor, coord) {
+			if (anchor && anchor.mode === 'element') {
+				const t = queryElement(doc, anchor.elementId);
+				if (!isRenderable(t)) return null;
+				const r = t.getBoundingClientRect();
+				const p = DDAnchor.pinPointFromElement({ left: r.left, top: r.top, width: r.width, height: r.height }, anchor.offsetPct);
+				return { x: p.left, y: p.top };
+			}
+			if (coord) {
+				const basis = basisElement(doc, coord.basis);
+				if (isRenderable(basis) || basis === doc.body) {
+					const r = basis.getBoundingClientRect();
+					const p = DDAnchor.rectFromCoord(coord, { left: r.left, top: r.top, width: r.width, height: r.height });
+					return { x: p.left, y: p.top };
+				}
+			}
+			return null;
+		}
+		// 화살표 배치 — root 전체 SVG 안에서 두 끝점 라인 갱신. 해석 불가(끝점 없음)면 숨김.
+		function layoutArrow(node, a, rootRect) {
+			const p1 = pointOf(a.anchor, a.coord);
+			const p2 = pointOf(a.anchor2, a.coord2);
+			if (!p1 || !p2) { node.style.display = 'none'; return false; }
+			node.style.display = '';
+			node.setAttribute('width', rootRect.width); node.setAttribute('height', rootRect.height);
+			node.style.width = rootRect.width + 'px'; node.style.height = rootRect.height + 'px';
+			const x1 = p1.x - rootRect.left, y1 = p1.y - rootRect.top, x2 = p2.x - rootRect.left, y2 = p2.y - rootRect.top;
+			node.querySelectorAll('line').forEach((l) => { l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2); });
+			return true;
+		}
+
 		// 재정렬 본체 — 요소/기준 rect 를 매번 다시 읽고 root 기준 상대 px 로 배치.
 		//   rootRect 와의 차로 계산하므로 body 마진·문서 스크롤 상태와 무관하게 정확하다.
 		function layout() {
@@ -339,6 +391,11 @@ body.clean #screen-nav { display: none !important; }
 				let gated = false;
 				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true; // spec-html 다른 화면
 				else if (a.anchor && a.anchor.screenSel && !isRenderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic — 소속 화면 컨테이너가 지금 안 보임
+				if (a.type === 'arrow') { // 화살표는 두 끝점 라인(별도 배치). 게이팅 시 숨김·트레이.
+					if (gated || !layoutArrow(node, a, rootRect)) { node.style.display = 'none'; hidden.push({ id: a.id, label: '↗' }); }
+					else visible++;
+					continue;
+				}
 				if (gated) {
 					abs = null; // 다른 화면 소속(element·coord·generic 공통) — 렌더 스킵
 				} else if (a.anchor && a.anchor.mode === 'element') {
@@ -498,6 +555,17 @@ body.clean #screen-nav { display: none !important; }
 			beginTextEdit(a.id); // 생성 즉시 캔버스에서 바로 타이핑
 			notifyChange();
 		}
+		// 화살표 생성 — 시작(x1,y1)·끝(x2,y2) 각각 포인트 앵커 자동판정(요소/좌표).
+		function createArrow(x1, y1, x2, y2) {
+			const s = pinAnchorAt(x1, y1);
+			const e2 = pinAnchorAt(x2, y2);
+			const a = DDModel.createAnnotation({ type: 'arrow', anchor: s.anchor, coord: s.coord, anchor2: e2.anchor, coord2: e2.coord });
+			DDNumbering.add(set, a);
+			rebuildNodes();
+			layout();
+			select(a.id);
+			notifyChange();
+		}
 
 		// 이동 확정 — 드롭 지점에서 앵커를 다시 판정한다(요소↔빈 곳 넘나들면 mode 도 전환).
 		function reanchor(a, node) {
@@ -596,11 +664,12 @@ body.clean #screen-nav { display: none !important; }
 			}
 			e.preventDefault();
 			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 읽기 모드에서
-			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text') : null;
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text, .dd-arrow') : null;
 			if (ddEl && ddEl.dataset.ddId) {
 				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
 				if (!a) return;
 				select(a.id);
+				if (a.type === 'arrow') { gesture = null; dragNodeId = null; return; } // 화살표는 선택만(이동은 재그리기 — MVP)
 				const nr = ddEl.getBoundingClientRect();
 				gesture = {
 					kind: 'move', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
@@ -632,6 +701,19 @@ body.clean #screen-nav { display: none !important; }
 				gesture.node.classList.toggle('dd-will-coord', !willEl);
 			} else {
 				if (tool === 'text') return; // 텍스트 도구는 드래그(러버밴드) 없음 — 클릭 지점에 생성
+				if (tool === 'arrow') { // 화살표 미리보기 — 시작→현재 점선 라인
+					if (!gesture.arrowPrev) {
+						const svg = doc.createElementNS(SVGNS, 'svg');
+						svg.setAttribute('class', 'dd-arrow-prev'); svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.pointerEvents = 'none'; svg.style.overflow = 'visible';
+						const ln = doc.createElementNS(SVGNS, 'line'); ln.setAttribute('stroke', '#7460D9'); ln.setAttribute('stroke-width', '2.5'); ln.setAttribute('stroke-dasharray', '5 4');
+						svg.appendChild(ln); root.appendChild(svg);
+						gesture.arrowPrev = { svg, ln };
+					}
+					gesture.arrowPrev.svg.setAttribute('width', rootRect.width); gesture.arrowPrev.svg.setAttribute('height', rootRect.height);
+					gesture.arrowPrev.ln.setAttribute('x1', gesture.sx - rootRect.left); gesture.arrowPrev.ln.setAttribute('y1', gesture.sy - rootRect.top);
+					gesture.arrowPrev.ln.setAttribute('x2', e.clientX - rootRect.left); gesture.arrowPrev.ln.setAttribute('y2', e.clientY - rootRect.top);
+					return;
+				}
 				if (!gesture.rubber) {
 					gesture.rubber = doc.createElement('div');
 					gesture.rubber.className = 'dd-rubber';
@@ -655,8 +737,10 @@ body.clean #screen-nav { display: none !important; }
 				if (g.moved) reanchor(g.a, g.node);
 				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
 			}
+			if (g.arrowPrev) g.arrowPrev.svg.remove();
 			if (g.rubber) g.rubber.remove();
 			if (tool === 'text') { createText(g.sx, g.sy); return; } // 텍스트 도구 — 클릭 지점(드래그 무시)에 생성
+			if (tool === 'arrow') { if (g.moved) createArrow(g.sx, g.sy, e.clientX, e.clientY); return; } // 화살표 — 드래그 시작→끝
 			if (g.moved) {
 				const left = Math.min(g.sx, e.clientX);
 				const top = Math.min(g.sy, e.clientY);
@@ -676,7 +760,7 @@ body.clean #screen-nav { display: none !important; }
 		//   핀·박스 라벨을 맞췄을 때만 봉인 — 그 외 클릭은 목업 goScreen 등으로 통과(화면 넘김 보존).
 		function onReadSelect(e) {
 			if (editable) return; // 편집 모드는 gesture 계열이 담당
-			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text') : null;
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text, .dd-arrow') : null;
 			if (!ddEl || !ddEl.dataset.ddId) return; // 핀 아닌 클릭 = 목업 통과
 			e.stopPropagation();
 			const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
@@ -752,7 +836,7 @@ body.clean #screen-nav { display: none !important; }
 			getSelectedClone,   // 복사용 deep clone
 			addClone,           // 붙여넣기·복제 — 새 id·오프셋 추가
 			nudgeSelected,      // 화살표 미세 이동
-			setTool(name) { tool = name === 'text' ? 'text' : 'annot'; root.classList.toggle('dd-tool-text', tool === 'text'); }, // 도구 전환(주석/텍스트)
+			setTool(name) { tool = (name === 'text' || name === 'arrow') ? name : 'annot'; root.classList.toggle('dd-tool-text', tool === 'text'); root.classList.toggle('dd-tool-arrow', tool === 'arrow'); }, // 도구 전환(주석/텍스트/화살표)
 			getTool: () => tool,
 			// 패널(셸) 쪽 구조 변경(삭제·재번호·라벨) 후 호출 — 노드 전체 재생성 + 재배치
 			refresh() {
@@ -763,7 +847,7 @@ body.clean #screen-nav { display: none !important; }
 			setEditable(on) {
 				editable = !!on;
 				root.classList.toggle('dd-editing', editable);
-				if (!editable) { endTextEdit(); gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text'); } // 편집 끄면 인라인 편집·도구 기본 복귀
+				if (!editable) { endTextEdit(); gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text', 'dd-tool-arrow'); } // 편집 끄면 인라인 편집·도구 기본 복귀
 			},
 			detach() {
 				try {

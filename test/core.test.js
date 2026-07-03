@@ -395,6 +395,28 @@ test('model/numbering: 텍스트 타입 — 번호 없음·시퀀스 제외(핀 
 	assert.strictEqual(DDModel.validateSet(s).ok, true);
 });
 
+test('model/numbering: 화살표 타입 — 두 끝점·번호 없음·검증', () => {
+	const s = DDModel.createSet('generic');
+	const ar = DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.2, y: 0.2 },
+		anchor2: { mode: 'coord' }, coord2: { basis: 'body', x: 0.6, y: 0.5 },
+	});
+	assert.strictEqual(ar.type, 'arrow');
+	assert.strictEqual(ar.autoNumber, false);
+	assert.strictEqual(ar.label, '');
+	assert.ok(ar.anchor2 && ar.coord2, '끝점 앵커/좌표 보존');
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pin001', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
+	DDNumbering.add(s, ar);
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pin002', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.5, y: 0.5 } }));
+	assert.strictEqual(s.annotations.find((a) => a.id === 'an_pin002').label, '2'); // 화살표가 번호 소비 안 함
+	assert.strictEqual(DDModel.validateSet(s).ok, true);
+	// 끝점 누락 arrow 는 검증 실패
+	const bad = DDModel.createSet('generic');
+	bad.annotations.push(DDModel.createAnnotation({ type: 'arrow', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
+	assert.strictEqual(DDModel.validateSet(bad).ok, false);
+});
+
 test('model: 색 SSOT — 차수별 다름·그룹색·상태색', () => {
 	assert.notStrictEqual(DDModel.phaseColor(1), DDModel.phaseColor(2));
 	assert.notStrictEqual(DDModel.phaseColor(2), DDModel.phaseColor(3)); // 2·3차 이제 서로 다름

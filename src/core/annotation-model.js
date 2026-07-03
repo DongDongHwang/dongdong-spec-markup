@@ -12,7 +12,7 @@
 
 	const DD_VERSION = 4;               // v4 — 문서 메타(docMeta: 표지·History·개요·플로우) 도입. v1~v3 은 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
-	const TYPES = ['pin', 'box', 'text']; // text = 번호 없는 캔버스 텍스트(B 1단계) — 시퀀스·계층에서 제외
+	const TYPES = ['pin', 'box', 'text', 'arrow']; // text·arrow = 번호 없는 캔버스 요소(시퀀스·계층 제외). arrow = 두 끝점(anchor+anchor2)
 	const ANCHOR_MODES = ['element', 'coord'];
 	const SOURCE_KINDS = ['spec-html', 'generic'];
 	const MARK_KINDS = ['신규', '기존'];  // 사용자가 핀마다 직접 지정. 신규는 차수(phase)로 2·3차 확장.
@@ -90,16 +90,18 @@
 	function createAnnotation(props, rng) {
 		const p = props || {};
 		const type = TYPES.includes(p.type) ? p.type : 'pin';
-		const isText = type === 'text'; // 텍스트는 번호 없음(label 기본 ''·autoNumber 강제 false)
+		const noNum = type === 'text' || type === 'arrow'; // 번호 없음(label 기본 ''·autoNumber false)
 		return {
 			id: p.id || genId(rng),
 			type,
 			seq: typeof p.seq === 'number' ? p.seq : 1,
-			label: p.label != null ? String(p.label) : (isText ? '' : '1'),
-			autoNumber: isText ? false : (p.autoNumber !== false),
+			label: p.label != null ? String(p.label) : (noNum ? '' : '1'),
+			autoNumber: noNum ? false : (p.autoNumber !== false),
 			parentId: p.parentId != null ? String(p.parentId) : null, // 1단계 계층 — 부모 핀 id(자식이면). null=최상위
 			anchor: p.anchor || null,   // { mode:'element', elementId, screenId?, offsetPct?, rectPct? }
 			coord: p.coord || null,     // { basis:'frame'|'body', x, y, w?, h? }  (mode='coord' 전용)
+			anchor2: p.anchor2 || null, // 화살표 끝점 앵커(arrow 전용) — start=anchor, end=anchor2
+			coord2: p.coord2 || null,   // 화살표 끝점 coord(arrow + end 가 coord 모드)
 			style: p.style || { variant: 'solid', color: '#7460D9' },
 			body: p.body || { format: 'html', html: '', plain: '' },
 			slots: p.slots || null,
@@ -185,6 +187,12 @@
 			const c = a.coord;
 			if (!c || !isPosRatio(c.x) || !isPosRatio(c.y)) errs.push(`${at}.coord: coord 모드는 x/y 비율 필수`);
 			else if (a.type === 'box' && !(isRatio(c.w) && isRatio(c.h))) errs.push(`${at}.coord: box 는 w/h 비율 필수`);
+		}
+		if (a.type === 'arrow') { // 끝점(anchor2) — 시작점과 같은 포인트 앵커(element|coord)
+			const m2 = a.anchor2 && a.anchor2.mode;
+			if (!ANCHOR_MODES.includes(m2)) errs.push(`${at}.anchor2.mode: ${ANCHOR_MODES.join('|')} 필수(arrow 끝점)`);
+			else if (m2 === 'element') { if (typeof a.anchor2.elementId !== 'string' || !a.anchor2.elementId) errs.push(`${at}.anchor2.elementId: element 끝점 필수`); }
+			else { const c2 = a.coord2; if (!c2 || !isPosRatio(c2.x) || !isPosRatio(c2.y)) errs.push(`${at}.coord2: coord 끝점 x/y 비율 필수`); }
 		}
 		if (a.mark != null) { // 있을 때만 형태 검증(미지정 null 은 통과)
 			if (typeof a.mark !== 'object') errs.push(`${at}.mark: 객체여야 함`);
