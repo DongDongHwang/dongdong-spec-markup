@@ -71,6 +71,8 @@ const DDOverlay = (() => {
 }
 #${ROOT_ID}.dd-editing .dd-text { cursor: move; }
 #${ROOT_ID}:not(.dd-editing) .dd-text { cursor: pointer; }
+#${ROOT_ID} .dd-text:empty::before { content: '텍스트'; color: #9aa0a6; } /* 빈 텍스트 placeholder */
+#${ROOT_ID} .dd-text.dd-editing-text { cursor: text; outline: 2px solid #7460D9; outline-offset: 1px; background: #fff; min-width: 40px; } /* 인라인 편집 중 */
 body:has(#${ROOT_ID}.dd-tool-text) { cursor: text !important; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
@@ -254,10 +256,15 @@ body.clean #screen-nav { display: none !important; }
 				lb.textContent = a.label;
 				el.appendChild(lb);
 			} else if (a.type === 'text') {
-				// 캔버스 텍스트(B 1단계) — 번호·배지·색 없이 내용만. 앵커는 포인트(핀과 동일 경로).
+				// 캔버스 텍스트 — 번호·배지·색 없이 내용만. 빈 값은 CSS placeholder. 인라인 편집(더블클릭·생성 시).
 				el = doc.createElement('div');
 				el.className = 'dd-text';
-				el.textContent = (a.body && a.body.plain) || '텍스트';
+				el.textContent = (a.body && a.body.plain) || '';
+				el.addEventListener('input', function () { // 인라인 편집 중 저장(편집 중인 노드만)
+					if (editingTextId !== a.id) return;
+					a.body = { format: 'html', html: el.innerHTML, plain: el.textContent || '' };
+					notifyChange();
+				});
 			} else {
 				el = doc.createElement('div');
 				el.className = 'dd-pin';
@@ -305,6 +312,7 @@ body.clean #screen-nav { display: none !important; }
 			for (const [id, el] of nodes) el.classList.toggle('dd-selected', id === selectedId);
 		}
 		function select(id) {
+			if (editingTextId && editingTextId !== id) endTextEdit(); // 다른 주석 선택 시 인라인 편집 종료
 			selectedId = id;
 			applySelection();
 			if (opts.onSelect) opts.onSelect(id);
@@ -487,6 +495,7 @@ body.clean #screen-nav { display: none !important; }
 			rebuildNodes();
 			layout();
 			select(a.id);
+			beginTextEdit(a.id); // 생성 즉시 캔버스에서 바로 타이핑
 			notifyChange();
 		}
 
@@ -560,8 +569,31 @@ body.clean #screen-nav { display: none !important; }
 		//   tool = 'annot'(기본: 클릭=핀·드래그=박스) | 'text'(클릭=텍스트, 드래그 없음).
 		let gesture = null;
 		let tool = 'annot';
+		let editingTextId = null; // 인라인 편집 중인 텍스트 id (그 노드만 contentEditable)
+		// 텍스트 인라인 편집 시작/종료 — 편집 중인 노드만 편집 가능(나머지는 드래그 이동 유지).
+		function beginTextEdit(id) {
+			const el = nodes.get(id);
+			if (!el || !editable || !el.classList.contains('dd-text')) return;
+			endTextEdit();
+			editingTextId = id;
+			el.contentEditable = 'true';
+			el.classList.add('dd-editing-text');
+			el.focus();
+			try { const rg = doc.createRange(); rg.selectNodeContents(el); rg.collapse(false); const s = win.getSelection(); s.removeAllRanges(); s.addRange(rg); } catch (_) {}
+		}
+		function endTextEdit() {
+			if (!editingTextId) return;
+			const el = nodes.get(editingTextId);
+			if (el) { el.contentEditable = 'false'; el.classList.remove('dd-editing-text'); }
+			editingTextId = null;
+		}
 		function onMouseDown(e) {
 			if (!editable || e.button !== 0) return;
+			if (editingTextId) { // 인라인 편집 중 — 그 텍스트 내부는 네이티브 캐럿, 바깥은 편집 종료
+				const editingEl = nodes.get(editingTextId);
+				if (e.target && editingEl && editingEl.contains(e.target)) return;
+				endTextEdit();
+			}
 			e.preventDefault();
 			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 읽기 모드에서
 			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text') : null;
@@ -650,8 +682,15 @@ body.clean #screen-nav { display: none !important; }
 			const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
 			if (a) select(a.id); // applySelection + onSelect(id) → 문서 뷰 행 하이라이트
 		}
+		// 더블클릭 — 텍스트 인라인 편집 진입(편집 모드 전용).
+		function onDblClick(e) {
+			if (!editable) return;
+			const t = e.target && e.target.closest ? e.target.closest('.dd-text') : null;
+			if (t && t.dataset.ddId) { e.preventDefault(); e.stopPropagation(); select(t.dataset.ddId); beginTextEdit(t.dataset.ddId); }
+		}
 		function onKeyDown(e) {
 			if (!editable) return;
+			if (editingTextId) { if (e.key === 'Escape') { e.preventDefault(); endTextEdit(); } return; } // 편집 중 — 삭제·화살표·복사 등은 네이티브 텍스트 편집 우선
 			if (e.key === 'Escape') { select(null); return; }
 			if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
 				e.preventDefault();
@@ -677,6 +716,7 @@ body.clean #screen-nav { display: none !important; }
 		doc.addEventListener('mouseup', onMouseUp, true);
 		doc.addEventListener('click', onClickCapture, true);
 		doc.addEventListener('click', onReadSelect, true);
+		doc.addEventListener('dblclick', onDblClick, true);
 		doc.addEventListener('keydown', onKeyDown, true);
 
 		// ---- 재정렬 트리거 — resize / 내부 스크롤(캡처) / DOM 변이(goScreen 재렌더·조건분기 class/style)
@@ -723,7 +763,7 @@ body.clean #screen-nav { display: none !important; }
 			setEditable(on) {
 				editable = !!on;
 				root.classList.toggle('dd-editing', editable);
-				if (!editable) { gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text'); } // 편집 끄면 도구 기본 복귀
+				if (!editable) { endTextEdit(); gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text'); } // 편집 끄면 인라인 편집·도구 기본 복귀
 			},
 			detach() {
 				try {
@@ -736,6 +776,7 @@ body.clean #screen-nav { display: none !important; }
 					doc.removeEventListener('mouseup', onMouseUp, true);
 					doc.removeEventListener('click', onClickCapture, true);
 					doc.removeEventListener('click', onReadSelect, true);
+					doc.removeEventListener('dblclick', onDblClick, true);
 					doc.removeEventListener('keydown', onKeyDown, true);
 					root.remove();
 					const st = doc.getElementById(STYLE_ID);
