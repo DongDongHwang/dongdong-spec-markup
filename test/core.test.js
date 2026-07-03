@@ -142,6 +142,17 @@ test('model: migrate v1·v2·v3 → v4 (옛 저장본 무손실 승격 + docMeta
 	assert.strictEqual(DDModel.migrate(v3).ddVersion, 4);
 });
 
+test('model: migrate — generic screenId 오저장 복구(#셀렉터 → screenSel)', () => {
+	const bad = { ddVersion: 4, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [
+		{ id: 'a1', type: 'pin', seq: 1, label: '1', anchor: { mode: 'coord', screenId: '#screen-0' }, coord: { basis: 'body', x: 0.5, y: 0.5 } },
+		{ id: 'a2', type: 'pin', seq: 2, label: '2', anchor: { mode: 'element', elementId: 'x', screenId: 'S1' } }, // spec-html 정상 screenId — 유지
+	] };
+	const out = DDModel.migrate(bad);
+	assert.strictEqual(out.annotations[0].anchor.screenId, undefined); // # 셀렉터는 screenId 에서 제거
+	assert.strictEqual(out.annotations[0].anchor.screenSel, '#screen-0'); // screenSel 로 이동
+	assert.strictEqual(out.annotations[1].anchor.screenId, 'S1'); // 정상 screenId 는 그대로
+});
+
 // ---- anchor ----------------------------------------------------------------
 
 const RECT = { left: 100, top: 200, width: 300, height: 60 }; // 요소/기준 렉트 예시

@@ -157,7 +157,10 @@ body.clean #screen-nav { display: none !important; }
 		}
 		// 찍을 때 화면 소속 기록 — spec-html 은 screenId(APP_DATA), generic 은 screenSel(DOM 컨테이너).
 		function tagScreen(anchor, screen, px, py) {
-			if (screen) { anchor.screenId = screen; return; }
+			// spec-html(mock 존재) 만 screen 을 APP_DATA 화면 ID 로 신뢰해 screenId 로 저장.
+			//   generic 은 screen 값이 실은 다른 핀의 screenSel 문자열(genScreen 반환)이라 screenId 로 넣으면
+			//   화면 넘김 게이팅이 깨진다(screen=null 시 screenId 조건 무력화) → 항상 DOM 컨테이너 재감지해 screenSel 로.
+			if (mock && screen) { anchor.screenId = screen; return; }
 			const sel = detectScreenSel(doc.elementFromPoint(px, py));
 			if (sel) anchor.screenSel = sel;
 		}

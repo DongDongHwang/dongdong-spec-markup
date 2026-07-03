@@ -142,6 +142,17 @@
 		if (!set || typeof set !== 'object') return set;
 		if (typeof set.ddVersion === 'number' && set.ddVersion < DD_VERSION) set.ddVersion = DD_VERSION;
 		if (!('docMeta' in set)) set.docMeta = null;
+		// generic 오저장 복구 — screenId 에 CSS 셀렉터(#·. 시작)가 든 건 옛 tagScreen 버그(generic 화면을 screenId 로 저장).
+		//   화면 넘김 게이팅이 깨지므로 screenSel 로 이동. spec-html screenId(S1·LGN-001 등)는 영향 없음.
+		if (Array.isArray(set.annotations)) {
+			for (const a of set.annotations) {
+				const an = a && a.anchor;
+				if (an && typeof an.screenId === 'string' && /^[#.]/.test(an.screenId)) {
+					if (!an.screenSel) an.screenSel = an.screenId;
+					delete an.screenId;
+				}
+			}
+		}
 		return set;
 	}
 

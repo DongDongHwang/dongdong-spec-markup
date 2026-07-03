@@ -78,7 +78,7 @@ const STORY_MULTI_HTML = `<!doctype html><html lang="ko"><head><meta charset="ut
 body{margin:0;font-family:sans-serif}.pg{padding:40px}.pg:not(.on){display:none}
 .box{padding:20px;border:1px solid #bbb}
 </style></head><body>
-<div class="pg on" id="pg-0"><div class="box" id="b0">화면0 콘텐츠</div></div>
+<div class="pg on" id="pg-0"><div class="box" id="b0">화면0-A</div><div class="box" id="b0b" style="margin-top:40px">화면0-B</div></div>
 <div class="pg" id="pg-1"><div class="box" id="b1">화면1 콘텐츠</div></div>
 <div class="pg" id="pg-2"><div class="box" id="b2">화면2 콘텐츠</div></div>
 <script>function showPage(i){var ps=document.querySelectorAll('.pg');for(var k=0;k<ps.length;k++)ps[k].classList.toggle('on',k===i);}</script>
@@ -307,24 +307,30 @@ app.whenReady().then(async () => {
 	const s1 = await wc.executeJavaScript(`(function(){
 		var tab=window.activeTab(); window.toggleEdit();
 		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
-		var el=doc.getElementById('b0'); var r=el.getBoundingClientRect();
-		var cx=Math.round(r.left+r.width/2), cy=Math.round(r.top+r.height/2);
-		doc.dispatchEvent(new win.MouseEvent('mousedown',{clientX:cx,clientY:cy,button:0,bubbles:true}));
-		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:cx,clientY:cy,button:0,bubbles:true}));
-		var a=tab.annotations.annotations[0];
-		return { src:tab.annotations.source.kind, total:tab.annotations.annotations.length, screenSel:a&&a.anchor&&a.anchor.screenSel, visible:tab.overlay.stats().visible };
+		function click(x,y){ doc.dispatchEvent(new win.MouseEvent('mousedown',{clientX:x,clientY:y,button:0,bubbles:true})); doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:x,clientY:y,button:0,bubbles:true})); }
+		var r=doc.getElementById('b0').getBoundingClientRect();
+		var r2=doc.getElementById('b0b').getBoundingClientRect();
+		click(Math.round(r.left+r.width/2), Math.round(r.top+r.height/2));  // 화면0 요소 A
+		click(Math.round(r2.left+r2.width/2), Math.round(r2.top+r2.height/2)); // 화면0 요소 B — 두 번째가 screenId 로 오저장되던 버그 재현
+		var a0=tab.annotations.annotations[0], a1=tab.annotations.annotations[1];
+		return { src:tab.annotations.source.kind, total:tab.annotations.annotations.length,
+			sel0:a0&&a0.anchor&&a0.anchor.screenSel, sid0:a0&&a0.anchor&&a0.anchor.screenId,
+			sel1:a1&&a1.anchor&&a1.anchor.screenSel, sid1:a1&&a1.anchor&&a1.anchor.screenId,
+			visible:tab.overlay.stats().visible };
 	})()`);
 	check('STORY generic 판정', s1.src === 'generic', 'src=' + s1.src);
-	check('화면0 핀 1개 — screenSel = #pg-0 감지', s1.screenSel === '#pg-0', 'screenSel=' + s1.screenSel);
-	check('화면0에서 핀 표시 = 1', s1.visible === 1, 'visible=' + s1.visible);
+	check('화면0에 핀 2개 찍힘', s1.total === 2, 'total=' + s1.total);
+	check('첫 핀 screenSel=#pg-0 (screenId 없음)', s1.sel0 === '#pg-0' && !s1.sid0, 'sel0=' + s1.sel0 + ' sid0=' + s1.sid0);
+	check('둘째 핀도 screenSel=#pg-0 (screenId 오저장 버그 수정)', s1.sel1 === '#pg-0' && !s1.sid1, 'sel1=' + s1.sel1 + ' sid1=' + s1.sid1);
+	check('화면0에서 핀 2개 표시', s1.visible === 2, 'visible=' + s1.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(1); return true; })()`);
 	await wait(850);
 	const s2 = await wc.executeJavaScript(`(function(){ return { visible:window.activeTab().overlay.stats().visible }; })()`);
-	check('화면1 전환 → 화면0 핀 숨김 = 0 (페이지마다 다른 주석)', s2.visible === 0, 'visible=' + s2.visible);
+	check('화면1 전환 → 화면0 핀 2개 모두 숨김 = 0 (둘째 핀도 게이팅됨)', s2.visible === 0, 'visible=' + s2.visible);
 	await wc.executeJavaScript(`(function(){ window.activeTab().frame.contentWindow.showPage(0); return true; })()`);
 	await wait(850);
 	const s3 = await wc.executeJavaScript(`(function(){ var tab=window.activeTab(); return { visible:tab.overlay.stats().visible, cur:window.currentScreenId(tab) }; })()`);
-	check('화면0 복귀 → 핀 복원 = 1', s3.visible === 1, 'visible=' + s3.visible);
+	check('화면0 복귀 → 핀 2개 복원 = 2', s3.visible === 2, 'visible=' + s3.visible);
 	check('generic 현재화면 감지 = #pg-0', s3.cur === '#pg-0', 'cur=' + s3.cur);
 
 	console.log('== 롱스크롤 (긴 페이지 스크롤 추종) ==');
