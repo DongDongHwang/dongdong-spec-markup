@@ -32,9 +32,9 @@
 }
 #dd-overlay-root .dd-pin.dd-active, #dd-overlay-root .dd-box.dd-active { outline: 3px solid rgba(116,96,217,.5); outline-offset: 2px; }
 #dd-overlay-root .dd-pin.dd-st-new { background: #18a558; }
-#dd-overlay-root .dd-pin.dd-st-modified { background: #e08600; }
+#dd-overlay-root .dd-pin.dd-st-modified { background: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
-#dd-overlay-root .dd-box.dd-st-modified { border-color: #e08600; }
+#dd-overlay-root .dd-box.dd-st-modified { border-color: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new .dd-box-label, #dd-overlay-root .dd-box.dd-st-modified .dd-box-label { background: inherit; }
 #dd-overlay-root .dd-pin.dd-ph { background: #D97706; }
 #dd-overlay-root .dd-box.dd-ph { border-color: #D97706; }

@@ -5,7 +5,7 @@
 //   주석은 숨은 트레이에 보존했다가 요소가 돌아오면 복귀한다.
 //   M3 편집 모드 — 목업 클릭 = 핀(앵커 mode 자동판정) / 드래그 = 박스 / 핀·박스 드래그 = 이동(재앵커) /
 //   클릭 = 선택 / Delete = 삭제 요청. 편집 중엔 목업 자체 인터랙션(goScreen 등)을 캡처 단계에서 차단해
-//   "버튼을 찍으려다 화면이 넘어가는" 오동작을 막는다(화면 이동은 뷰어 모드에서).
+//   "버튼을 찍으려다 화면이 넘어가는" 오동작을 막는다(화면 이동은 읽기 모드에서).
 // 의존 — window.DDAnchor·DDModel·DDNumbering (core, index.html 에서 먼저 로드).
 
 'use strict';
@@ -35,11 +35,11 @@ const DDOverlay = (() => {
 }
 #${ROOT_ID} .dd-selected { outline: 3px solid rgba(116,96,217,.45); outline-offset: 2px; }
 #${ROOT_ID} .dd-pin.dd-st-new { background: #18a558; }
-#${ROOT_ID} .dd-pin.dd-st-modified { background: #e08600; }
+#${ROOT_ID} .dd-pin.dd-st-modified { background: #E08600; }
 #${ROOT_ID} .dd-box.dd-st-new { border-color: #18a558; }
-#${ROOT_ID} .dd-box.dd-st-modified { border-color: #e08600; }
+#${ROOT_ID} .dd-box.dd-st-modified { border-color: #E08600; }
 #${ROOT_ID} .dd-box.dd-st-new .dd-box-label { background: #18a558; }
-#${ROOT_ID} .dd-box.dd-st-modified .dd-box-label { background: #e08600; }
+#${ROOT_ID} .dd-box.dd-st-modified .dd-box-label { background: #E08600; }
 /* 신규 2·3차 — 볼트 phase.css 황색 언어(#D97706). dd-st-new 뒤에 둬 우선. */
 #${ROOT_ID} .dd-pin.dd-ph { background: #D97706; }
 #${ROOT_ID} .dd-box.dd-ph { border-color: #D97706; }
@@ -58,6 +58,7 @@ const DDOverlay = (() => {
 }
 #${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
 #${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
+#${ROOT_ID}:not(.dd-editing) .dd-pin, #${ROOT_ID}:not(.dd-editing) .dd-box-label { cursor: pointer; } /* 읽기 모드 = 클릭해 설명 보기 */
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
@@ -519,7 +520,7 @@ body.clean #screen-nav { display: none !important; }
 		function onMouseDown(e) {
 			if (!editable || e.button !== 0) return;
 			e.preventDefault();
-			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 뷰어 모드에서
+			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 읽기 모드에서
 			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box') : null;
 			if (ddEl && ddEl.dataset.ddId) {
 				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
@@ -589,6 +590,16 @@ body.clean #screen-nav { display: none !important; }
 			e.preventDefault();
 			e.stopPropagation(); // mousedown 차단과 짝 — 목업 click 핸들러(goScreen 등)까지 확실히 봉인
 		}
+		// 읽기 모드 핀 클릭 = 선택(하이라이트)만. editable 게이트는 안 건드린다.
+		//   핀·박스 라벨을 맞췄을 때만 봉인 — 그 외 클릭은 목업 goScreen 등으로 통과(화면 넘김 보존).
+		function onReadSelect(e) {
+			if (editable) return; // 편집 모드는 gesture 계열이 담당
+			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box') : null;
+			if (!ddEl || !ddEl.dataset.ddId) return; // 핀 아닌 클릭 = 목업 통과
+			e.stopPropagation();
+			const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
+			if (a) select(a.id); // applySelection + onSelect(id) → 문서 뷰 행 하이라이트
+		}
 		function onKeyDown(e) {
 			if (!editable) return;
 			if (e.key === 'Escape') { select(null); return; }
@@ -615,6 +626,7 @@ body.clean #screen-nav { display: none !important; }
 		doc.addEventListener('mousemove', onMouseMove, true);
 		doc.addEventListener('mouseup', onMouseUp, true);
 		doc.addEventListener('click', onClickCapture, true);
+		doc.addEventListener('click', onReadSelect, true);
 		doc.addEventListener('keydown', onKeyDown, true);
 
 		// ---- 재정렬 트리거 — resize / 내부 스크롤(캡처) / DOM 변이(goScreen 재렌더·조건분기 class/style)
@@ -671,6 +683,7 @@ body.clean #screen-nav { display: none !important; }
 					doc.removeEventListener('mousemove', onMouseMove, true);
 					doc.removeEventListener('mouseup', onMouseUp, true);
 					doc.removeEventListener('click', onClickCapture, true);
+					doc.removeEventListener('click', onReadSelect, true);
 					doc.removeEventListener('keydown', onKeyDown, true);
 					root.remove();
 					const st = doc.getElementById(STYLE_ID);

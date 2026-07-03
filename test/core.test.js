@@ -279,6 +279,16 @@ test('runtime: 직렬화 문자열에 마킹·차수 렌더 로직 포함(회귀
 	assert.ok(DDRuntimeSrc.RUNTIME_CSS.includes('dd-ph'), 'phase 황색 CSS 포함');
 });
 
+test('runtime: 팔레트가 core SSOT 와 일치(드리프트 가드)', () => {
+	// annotation-model 이 색 SSOT. dd-runtime 은 저장본 자기완결(외부 require 0) 때문에 팔레트를 판박이 복제한다.
+	// 어느 한쪽만 바뀌면 저장본 색이 앱과 달라지므로, SSOT 배열 리터럴이 직렬화 문자열에 그대로 있는지 잠근다.
+	const src = DDRuntimeSrc.RUNTIME_JS;
+	const lit = (arr) => "['" + arr.join("', '") + "']";
+	assert.ok(src.includes(lit(DDModel.PHASE_PALETTE)), 'RUNTIME_JS PHASE_PAL 이 core PHASE_PALETTE 와 일치');
+	assert.ok(src.includes(lit(DDModel.GROUP_PALETTE)), 'RUNTIME_JS GROUP_PAL 이 core GROUP_PALETTE 와 일치');
+	assert.strictEqual(DDModel.statusColor({ origin: 'draft', edited: true }), '#E08600', 'modified 색 대문자 통일');
+});
+
 // ---- numbering -------------------------------------------------------------
 
 function numSet(n) {

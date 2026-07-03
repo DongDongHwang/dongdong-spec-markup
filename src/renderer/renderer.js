@@ -209,7 +209,7 @@ function createTab(group) {
 	const frame = document.createElement('iframe');
 	frame.className = 'doc-frame hidden'; // 문서 로드 전엔 숨김(웰컴만 표시)
 	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이를 iframe 문서 내부에 주입). 네비 가드·오버레이는 load 에서.
-	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); applyMockupChrome(tab); renderScreenNav(); });
+	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); if (tab.docMode) ensureDocMeta(tab); applyMockupChrome(tab); renderAnnotPanel(); renderScreenNav(); });
 	contentEl.append(welcomeEl, frame);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
@@ -345,6 +345,7 @@ function removeAnnotation(tab, id) {
 	if (tab.overlay) tab.overlay.refresh();
 	markDirty(tab);
 	renderAnnotPanel();
+	showToast('주석 삭제됨 — 실행취소 Ctrl+Z', 'ok');
 }
 
 // 미저장 표시 — 탭 제목 ● + 저장 버튼 활성화(syncTopbar).
@@ -406,45 +407,48 @@ async function saveTab(asNew) {
 if (saveBtn) saveBtn.addEventListener('click', (e) => saveTab(!!e.shiftKey));
 window.ddsv.onMenuSave((as) => saveTab(!!as));
 
-// 편집 모드 토글 — 주석 세트가 없으면 여기서 처음 만든다(spec-html 판별은 APP_DATA 유무).
+// M5.6 — 문서 뷰 표지·History 추출(docMeta 없을 때만). 저장 전에도 표지가 보이게.
+//   저장 시 saveTab 이 최신 스냅샷으로 재추출. generic·이력 없으면 normalizeDocMeta 가 null.
+function ensureDocMeta(tab) {
+	if (!tab.annotations || tab.annotations.docMeta) return;
+	try {
+		const cover = DDOverlay.readCover(tab.frame);
+		const history = DDOverlay.readHistory(tab.frame);
+		tab.annotations.docMeta = DDModel.normalizeDocMeta({ title: cover.title, version: cover.version, history });
+	} catch (_) { /* 추출 실패 — 표지 생략 */ }
+}
+
+// 모드 세팅 단일화 — editMode/docMode 는 항상 상보(둘 중 하나). "뷰어"(neither) 상태 없음.
+//   mode='edit' = 쓰기(오버레이 편집 가능) / 'doc' = 읽기(문서 표·핀 하이라이트, 목업 화면전환 가능).
+//   유령 뷰어 재발 방지 — 상태 전환은 전부 이 함수 하나를 거친다.
+function setMode(tab, mode) {
+	const edit = mode === 'edit';
+	tab.editMode = edit;
+	tab.docMode = !edit;
+	if (edit && !tab.annotations) { // 첫 편집 진입 시 세트 생성(spec-html 판별은 APP_DATA 유무)
+		tab.annotations = DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
+	}
+	if (!edit) ensureDocMeta(tab); // 문서 뷰 진입 — 표지·History 추출
+	if (tab.overlay) tab.overlay.setEditable(edit);
+	else attachOverlay(tab); // 오버레이 미부착(빈 주석 등)이면 새로 시도
+	applyMockupChrome(tab); // dd-docview(문서 뷰 전용 숨김) 토글 반영
+	syncTopbar();
+}
+
+// 편집 모드 토글 — 읽기(doc) ↔ 쓰기(edit) 사이를 뒤집는다. 뷰어 중간 상태 없음.
 function toggleEdit() {
 	const tab = activeTab();
 	if (!tab || !tab.docPath) return;
-	tab.editMode = !tab.editMode;
-	if (tab.editMode) tab.docMode = false; // 편집 ↔ 문서 뷰 상호 배타(편집은 쓰기, 문서 뷰는 읽기)
-	if (tab.editMode && !tab.annotations) {
-		tab.annotations = DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
-	}
-	if (tab.overlay) tab.overlay.setEditable(tab.editMode);
-	else attachOverlay(tab);
-	applyMockupChrome(tab); // 편집으로 전환 시 dd-docview(문서 뷰 전용 숨김) 해제 반영
-	syncTopbar();
+	setMode(tab, tab.editMode ? 'doc' : 'edit');
 }
 if (editBtn) editBtn.addEventListener('click', toggleEdit);
 
 // ---- 문서 뷰 토글 (M5.5) — 목업 + 우측 번호·설명 표(읽기 전용 1세대 포맷) --------------
-// 편집과 배타. 켜면 오버레이를 읽기 모드로 붙이고 우측 패널을 문서 표로 렌더한다(renderAnnotPanel 분기).
+// 편집과 상보. 빈 주석 파일도 진입 가능(빈 상태 CTA 노출). renderAnnotPanel 이 표로 렌더.
 function toggleDocMode() {
 	const tab = activeTab();
 	if (!tab || !tab.docPath) return;
-	const hasAnn = !!(tab.annotations && tab.annotations.annotations.length > 0);
-	if (!tab.docMode && !hasAnn) return; // 켤 땐 주석 필요(재렌더할 게 없으면 의미 없음), 끌 땐 무조건 허용
-	tab.docMode = !tab.docMode;
-	if (tab.docMode) {
-		tab.editMode = false; // 문서 뷰는 읽기 — 편집 강제 해제
-		if (tab.overlay) tab.overlay.setEditable(false);
-		else attachOverlay(tab); // 주석 있으면 읽기 오버레이 부착(핀 표시)
-		// M5.6 — 문서 뷰 진입 시 표지·History 추출(저장 전에도 보이게). 저장 시 saveTab 이 최신 스냅샷으로 재추출.
-		if (tab.annotations && !tab.annotations.docMeta) {
-			try {
-				const cover = DDOverlay.readCover(tab.frame);
-				const history = DDOverlay.readHistory(tab.frame);
-				tab.annotations.docMeta = DDModel.normalizeDocMeta({ title: cover.title, version: cover.version, history });
-			} catch (_) { /* 추출 실패 — 표지 생략 */ }
-		}
-	}
-	applyMockupChrome(tab); // 문서 뷰 = 목업 우측 화면정보(#description)까지 숨김 / 해제 시 복귀
-	syncTopbar();
+	setMode(tab, tab.docMode ? 'edit' : 'doc');
 }
 if (docBtn) docBtn.addEventListener('click', toggleDocMode);
 
@@ -543,8 +547,8 @@ async function loadDocIntoTab(tab, filePath, opts) {
 	tab._snapshot = undefined; tab._undo = []; tab._redo = []; // Undo 스택 리셋(새 문서)
 	tab.isAnnotated = !!io.set; // 이 파일이 이미 dd 주석본인지 — 순수 목업이면 첫 저장 시 복사본 생성(원본 보존)
 	tab.exists = true;
-	tab.editMode = false; // 새 문서 = 뷰어 모드부터 (편집은 명시 토글)
-	tab.docMode = false;  // 문서 뷰도 리셋(이전 문서의 표 잔류 방지)
+	tab.editMode = false; // 새 문서 = 읽기(문서 뷰)로 시작 — 실제 오버레이·표지 셋업은 iframe load 콜백에서
+	tab.docMode = true;   // 기본 진입 = 문서 보기(뷰어 중간 상태 폐지)
 	tab.dirty = false;
 	if (opts.history !== false) pushTabHistory(tab, tab.docPath);
 	tab.frame.srcdoc = tab.pure; // iframe 격리 렌더(순수 목업) — load 시 네비 가드+오버레이 재부착
@@ -732,8 +736,8 @@ function syncTopbar() {
 	}
 	const hasAnn = !!(tab && tab.annotations && tab.annotations.annotations.length > 0);
 	if (docBtn) {
-		// 문서 뷰 = 주석이 있어야 의미(핀·설명을 표로 재렌더). 주석 없으면 비활성.
-		docBtn.disabled = !(hasDoc && hasAnn);
+		// 문서 뷰 = 기본 읽기 상태. 주석 없어도 진입 가능(빈 상태 CTA 노출) — 문서만 있으면 활성.
+		docBtn.disabled = !hasDoc;
 		docBtn.classList.toggle('is-on', !!(tab && tab.docMode));
 	}
 	if (layoutEl) layoutEl.classList.toggle('doc-mode', !!(tab && tab.docMode)); // 문서 뷰 레이아웃(우측 표 넓힘·편집 UI 숨김)
@@ -993,6 +997,24 @@ function renderDocPanel(tab) {
 		li.addEventListener('click', () => { if (tab.overlay) tab.overlay.select(a.id); highlightDocRow(a.id); });
 		annotList.appendChild(li);
 	}
+	// 빈 상태 — 이 문서에 주석이 하나도 없으면(총 0) 편집 시작 CTA. 현재 화면만 비었으면(총>0) 화면 안내만.
+	if (anns.length === 0) {
+		const total = (tab.annotations && Array.isArray(tab.annotations.annotations)) ? tab.annotations.annotations.length : 0;
+		const eli = document.createElement('li');
+		eli.className = 'doc-empty-cta';
+		if (total === 0) {
+			eli.innerHTML = '<div class="doc-empty-msg">아직 주석이 없어요.</div><div class="doc-empty-sub">편집을 켜고 목업 위를 클릭해 핀을 찍어보세요.</div>';
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'doc-empty-btn';
+			btn.textContent = '✏ 편집 시작';
+			btn.addEventListener('click', () => toggleEdit());
+			eli.appendChild(btn);
+		} else {
+			eli.innerHTML = '<div class="doc-empty-msg">이 화면엔 주석이 없어요.</div><div class="doc-empty-sub">좌측 화면 목록에서 다른 화면을 선택해보세요.</div>';
+		}
+		annotList.appendChild(eli);
+	}
 	if (tab.overlay) highlightDocRow(tab.overlay.getSelected());
 }
 // 문서 뷰 행 하이라이트 + 스크롤(편집기 렌더 없음 — 읽기 전용)
@@ -1078,7 +1100,8 @@ function escapeHtml(s) {
 let apdSlotMode = false; // 슬롯 뷰 on/off (핀마다 slots 유무로 초기화)
 function renderDetail() {
 	if (!apDetail) return;
-	const { ann } = selectedAnnotation();
+	const { tab, ann } = selectedAnnotation();
+	if (!tab || !tab.editMode) { apDetail.classList.add('hidden'); return; } // 읽기 모드 = 편집기 절대 미노출(읽기의 마지막 방어선)
 	if (!ann) { apDetail.classList.add('hidden'); return; }
 	apDetail.classList.remove('hidden');
 	apdLabel.textContent = ann.label;
@@ -1112,7 +1135,7 @@ function renderSlots(ann) {
 		ta.addEventListener('input', () => {
 			autoGrow(ta);
 			const { tab, ann: cur } = selectedAnnotation();
-			if (!cur) return;
+			if (!cur || !tab || !tab.editMode) return; // 읽기 모드 슬롯 저장 차단
 			cur.slots = cur.slots || { template: 'app-5dim', fields: {} };
 			cur.slots.fields[s.key] = ta.value;
 			const c = composeSlots(cur.slots.fields, slotSetOf(cur.slots));
@@ -1215,7 +1238,7 @@ function updateRowText(ann) {
 if (apdEditor) {
 	apdEditor.addEventListener('input', () => {
 		const { tab, ann } = selectedAnnotation();
-		if (!ann || apdSlotMode) return;
+		if (!ann || apdSlotMode || !tab || !tab.editMode) return; // 읽기 모드 저장 차단(2중 잠금)
 		ann.body = { format: 'html', html: apdEditor.innerHTML, plain: apdEditor.textContent || '' };
 		ann.slots = null; // 자유 텍스트로 쓰면 슬롯 스냅샷 폐기(SSOT=자유 텍스트)
 		markEdited(ann); // 초안 손대면 '수정'
