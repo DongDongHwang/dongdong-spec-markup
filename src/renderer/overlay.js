@@ -464,6 +464,7 @@ body.clean #screen-nav { display: none !important; }
 					node.style.height = Math.max(0, abs.height) + 'px';
 				} else if (a.type === 'text' && a.style && a.style.width) {
 					node.style.width = a.style.width + 'px'; // 리사이즈된 텍스트 폭(px). 높이는 내용 맞춤(auto).
+					node.style.maxWidth = 'none'; // CSS 기본 max-width:240px 캡 해제 — 리사이즈 폭이 실제 반영되게
 				}
 				visible++;
 			}
@@ -795,6 +796,7 @@ body.clean #screen-nav { display: none !important; }
 				g.node.style.top = (top - rootRect.top) + 'px';
 				g.node.style.width = width + 'px';
 				if (g.a.type === 'box') g.node.style.height = height + 'px'; // 텍스트 높이는 내용 맞춤(auto)
+				else g.node.style.maxWidth = 'none'; // 텍스트 — 드래그 중에도 240px 캡 해제(폭 실시간 반영)
 				return;
 			}
 			if (g.kind === 'move') {
