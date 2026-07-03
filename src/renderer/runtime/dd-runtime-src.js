@@ -66,6 +66,15 @@
 #dd-panel.dd-collapsed { width: auto; bottom: auto; }
 #dd-panel.dd-collapsed .dd-p-list { display: none; }
 body.dd-docview #description { display: none !important; }
+#dd-panel .dd-p-front { display: block; padding: 10px 4px 12px; border-bottom: 2px solid #7460D9; margin-bottom: 6px; list-style: none; }
+#dd-panel .dd-cover-title { font-size: 15px; font-weight: 800; line-height: 1.35; }
+#dd-panel .dd-cover-ver { margin-top: 3px; font-size: 11px; font-weight: 700; color: #7460D9; }
+#dd-panel .dd-hist-h { font-size: 11px; font-weight: 700; margin: 6px 0 3px; }
+#dd-panel .dd-hist-tbl { width: 100%; border-collapse: collapse; font-size: 10px; }
+#dd-panel .dd-hist-tbl th, #dd-panel .dd-hist-tbl td { border: 1px solid #e5e7eb; padding: 2px 4px; text-align: left; vertical-align: top; }
+#dd-panel .dd-hist-tbl th { background: rgba(116,96,217,.08); font-weight: 700; }
+/* 문서 뷰에서 목업 자체 화면 네비 복원 — clean 이 숨긴 걸 되살려 저장본에서 화면 넘김 가능(dd 자체 네비 없이 목업 nav 재활용) */
+body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: revert !important; }
 @media print { #dd-panel { position: static; width: auto; box-shadow: none; border: none; } #dd-overlay-root .dd-pin { box-shadow: none; } }
 `;
 
@@ -143,6 +152,21 @@ body.dd-docview #description { display: none !important; }
 			if (a.body && a.body.plain) return '<p>' + a.body.plain.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }) + '</p>';
 			return '<p style="color:#9aa0a6">(설명 없음)</p>';
 		}
+		// M5.6 — 표지·History 앞 블록 (docMeta). dd 앱 docFrontHtml 판박이(마크업 동일, 클래스만 dd- prefix).
+		function docFrontHtml(dm) {
+			var h = '<div class="dd-cover"><div class="dd-cover-title">' + escHtml(dm.title || '(제목 없음)') + '</div>';
+			if (dm.version) h += '<div class="dd-cover-ver">' + escHtml(dm.version) + '</div>';
+			h += '</div>';
+			if (dm.history && dm.history.length) {
+				h += '<div class="dd-hist"><div class="dd-hist-h">변경 이력</div><table class="dd-hist-tbl"><thead><tr><th>No</th><th>날짜</th><th>버전</th><th>내용</th><th>작성</th></tr></thead><tbody>';
+				for (var i = 0; i < dm.history.length; i++) {
+					var r = dm.history[i];
+					h += '<tr><td>' + escHtml(r.no) + '</td><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.ver) + '</td><td>' + escHtml(r.content) + '</td><td>' + escHtml(r.author) + '</td></tr>';
+				}
+				h += '</tbody></table></div>';
+			}
+			return h;
+		}
 
 		for (var i = 0; i < anns.length; i++) {
 			(function (a) {
@@ -212,6 +236,12 @@ body.dd-docview #description { display: none !important; }
 			list.innerHTML = ''; rows = {};
 			var sa = visibleAnns();
 			headTitle.innerHTML = (docMode ? '문서 뷰 ' : '주석 ') + '<b>' + sa.length + '</b>';
+			// M5.6 — 문서 뷰 최상단 표지·History 1회 (docMeta 있을 때). generic·이력 없으면 생략.
+			if (docMode && set.docMeta) {
+				var fli = doc.createElement('li'); fli.className = 'dd-p-front';
+				fli.innerHTML = docFrontHtml(set.docMeta);
+				list.appendChild(fli);
+			}
 			for (var j = 0; j < sa.length; j++) {
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);

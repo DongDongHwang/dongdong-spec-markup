@@ -26,7 +26,7 @@ body{margin:0;font-family:sans-serif}.mobile-frame{width:360px;margin:20px auto;
   <div class="el" data-element-id="S1-EL-002">화면1 요소 B</div>
 </div>
 <script>
-const APP_DATA = { currentScreen:"S1", screens:{ S1:{id:"S1",name:"화면 1"}, S2:{id:"S2",name:"화면 2"} } };
+const APP_DATA = { project:{name:"테스트 기능",version:"v1.0"}, currentScreen:"S1", history:[{no:1,date:"2026-07-03",version:"v1.0",content:"최초 작성",author:"동동이"}], screens:{ S1:{id:"S1",name:"화면 1"}, S2:{id:"S2",name:"화면 2"} } };
 function goScreen(id){ if(!APP_DATA.screens[id]) return; APP_DATA.currentScreen=id; document.querySelector(".mobile-frame").className="mobile-frame screen-"+id; }
 </script>
 </body></html>`;
@@ -143,7 +143,10 @@ const SPEC_SCENARIO = `(function(){
 		curScreen:window.currentScreenId(tab),
 		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean'),
 		docviewApplied:tab.frame.contentDocument.body.classList.contains('dd-docview'),
-		newBadges:document.querySelectorAll('#annot-list .st-badge.st-new').length
+		newBadges:document.querySelectorAll('#annot-list .st-badge.st-new').length,
+		docFront:!!document.querySelector('#annot-list .doc-front'),
+		coverTitle:(document.querySelector('.doc-cover-title')||{}).textContent,
+		histRows:document.querySelectorAll('.doc-hist-tbl tbody tr').length
 	};
 })()`;
 
@@ -165,7 +168,8 @@ const GENERIC_SCENARIO = `(function(){
 		importHidden:(!b||b.classList.contains('hidden')),
 		curScreen:window.currentScreenId(tab),
 		cleanApplied:tab.frame.contentDocument.body.classList.contains('clean'),
-		navHidden:document.getElementById('screen-section').classList.contains('hidden')
+		navHidden:document.getElementById('screen-section').classList.contains('hidden'),
+		docFront:!!document.querySelector('#annot-list .doc-front')
 	};
 })()`;
 
@@ -186,6 +190,9 @@ app.whenReady().then(async () => {
 	check('spec-html 목업 clean 자동 적용(목업 자체 주석 끔)', r1.cleanApplied === true);
 	check('문서 뷰 → iframe body.dd-docview(#description 숨김)', r1.docviewApplied === true);
 	check('diff — 직접 찍은 핀 신규 배지(S1 2개)', r1.newBadges === 2, 'newBadges=' + r1.newBadges);
+	check('M5.6 표지 블록(doc-front) 렌더', r1.docFront === true);
+	check('표지 제목 = APP_DATA.project.name', r1.coverTitle === '테스트 기능', 'title=' + r1.coverTitle);
+	check('History 표 1행(APP_DATA.history)', r1.histRows === 1, 'histRows=' + r1.histRows);
 
 	await wc.executeJavaScript(SWITCH_SCENARIO);
 	await wait(850); // rAF + MutationObserver(class) → onScreenChange → 우측 표 재렌더 (여유 있게 — 400ms 는 flaky)
@@ -240,6 +247,7 @@ app.whenReady().then(async () => {
 	check('generic curScreen = null', r2.curScreen === null || r2.curScreen === undefined, 'curScreen=' + JSON.stringify(r2.curScreen));
 	check('generic 은 clean 미적용(spec-html 아님)', r2.cleanApplied === false);
 	check('generic 은 화면 네비 숨김(화면 개념 없음)', r2.navHidden === true);
+	check('generic 은 표지 없음(docMeta null·불변 원칙)', r2.docFront === false);
 
 	console.log('== admin 목업 (data-field 앵커·APP_DATA 없음) ==');
 	await wc.executeJavaScript(`(async function(){ window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(adminPath)}, {history:false}); return true; })()`);

@@ -38,6 +38,8 @@ const set = DDModel.createSet('spec-html');
 DDNumbering.add(set, DDModel.createAnnotation({ type: 'pin', anchor: { mode: 'element', elementId: 'S1-EL-001', screenId: 'S1' }, body: { format: 'html', html: '<p><b>기능.</b> 요소 A</p>', plain: '요소 A' } }));
 DDNumbering.add(set, DDModel.createAnnotation({ type: 'pin', anchor: { mode: 'element', elementId: 'S1-EL-002', screenId: 'S1' }, body: { format: 'html', html: '<p>요소 B</p>', plain: '요소 B' } }));
 DDNumbering.add(set, DDModel.createAnnotation({ type: 'pin', anchor: { mode: 'coord', screenId: 'S2' }, coord: { basis: 'body', x: 0.5, y: 0.5 }, body: { format: 'html', html: '<p>화면2 핀</p>', plain: '화면2' } }));
+// M5.6 — 저장 시 캐싱되는 표지·History 스냅샷(saveTab 이 채우는 것). 저장본이 목업 스크립트 없이도 표지 렌더.
+set.docMeta = DDModel.normalizeDocMeta({ title: '테스트 기능', version: 'v1.0', history: [{ no: 1, date: '2026-07-03', ver: 'v1.0', content: '최초 작성', author: '동동이' }] });
 
 const runtime = { css: DDRuntimeSrc.RUNTIME_CSS, js: DDRuntimeSrc.RUNTIME_JS };
 const saved = DDHtmlIO.embed(PURE, set, runtime);
@@ -73,7 +75,10 @@ app.whenReady().then(async () => {
 			bodyHtml:!!document.querySelector('#dd-panel .dd-p-row .dd-p-body b'),
 			cleanApplied:document.body.classList.contains('clean'),
 			docviewApplied:document.body.classList.contains('dd-docview'),
-			newBadges:document.querySelectorAll('#dd-panel .dd-p-badge.dd-b-new').length
+			newBadges:document.querySelectorAll('#dd-panel .dd-p-badge.dd-b-new').length,
+			docFront:!!document.querySelector('#dd-panel .dd-p-front'),
+			coverTitle:(document.querySelector('#dd-panel .dd-cover-title')||{}).textContent,
+			histRows:document.querySelectorAll('#dd-panel .dd-hist-tbl tbody tr').length
 		};
 	})()`);
 	check('저장본 우측 패널 자체 렌더(dd 없이)', r.hasPanel === true);
@@ -86,6 +91,9 @@ app.whenReady().then(async () => {
 	check('diff — 신규 배지(S1 2개, 직접 생성 manual)', r.newBadges === 2, 'newBadges=' + r.newBadges);
 	check('저장본 clean 자동 적용(dd 없이도 목업 자체 주석 끔)', r.cleanApplied === true);
 	check('문서 뷰 → body.dd-docview(#description 숨김)', r.docviewApplied === true);
+	check('저장본 표지 블록(dd-p-front) 렌더', r.docFront === true);
+	check('저장본 표지 제목 = docMeta.title', r.coverTitle === '테스트 기능', 'title=' + r.coverTitle);
+	check('저장본 History 표 1행', r.histRows === 1, 'histRows=' + r.histRows);
 
 	await wc.executeJavaScript(`(function(){ window.goScreen('S2'); return true; })()`);
 	await wait(450); // class 변경 → MutationObserver → layout → 문서 뷰 재렌더

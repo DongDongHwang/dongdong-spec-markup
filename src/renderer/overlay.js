@@ -694,6 +694,45 @@ body.clean #screen-nav { display: none !important; }
 		return [];
 	}
 
+	// 전역 lexical(const/var) 읽기 — `const OVERVIEW`·`var HISTORY` 는 win 에 안 붙어 realm 내 간접 eval 로 읽는다(resolveAppData 패턴).
+	function resolveGlobal(win, name) {
+		try { return win.eval('typeof ' + name + ' === "undefined" ? null : ' + name) || null; }
+		catch (_) { return null; }
+	}
+
+	// 표지 데이터 — 신버전 APP_DATA.project{name,version} 우선, 없으면 전역 OVERVIEW{name | 기능정의.기능명}. generic 은 빈값.
+	//   버전은 신버전 project.version 만 신뢰(구버전 OVERVIEW 엔 정형 version 없음 — History 최신 ver 로 보강은 호출측 몫).
+	function readCover(frame) {
+		try {
+			const win = frame.contentWindow;
+			const app = resolveAppData(win);
+			const ov = resolveGlobal(win, 'OVERVIEW');
+			let title = '', version = '';
+			if (app && app.project) { title = app.project.name || ''; version = app.project.version || ''; }
+			if (!title && ov) title = ov.name || (ov.기능정의 && ov.기능정의.기능명) || '';
+			return { title: title, version: version };
+		} catch (_) { return { title: '', version: '' }; }
+	}
+
+	// 버전 이력 — 신버전 APP_DATA.history(키 version·screen) 우선, 없으면 전역 HISTORY(키 ver·note). 키 차이 정규화(ver=version||ver).
+	//   generic·이력 없는 목업은 빈 배열 → 표지/History 섹션 생략(불변 원칙).
+	function readHistory(frame) {
+		try {
+			const win = frame.contentWindow;
+			const app = resolveAppData(win);
+			let raw = (app && Array.isArray(app.history)) ? app.history : null;
+			if (!raw) raw = resolveGlobal(win, 'HISTORY');
+			if (!Array.isArray(raw)) return [];
+			return raw.map((h) => ({
+				no: h && h.no != null ? String(h.no) : '',
+				date: (h && h.date) || '',
+				ver: (h && (h.ver || h.version)) || '',
+				content: (h && h.content) || '',
+				author: (h && h.author) || '',
+			}));
+		} catch (_) { return []; }
+	}
+
 	// 한 화면으로 전환 후 그 순간의 스테이지 DOM 클론 — 신버전은 innerHTML 재작성이 rAF 뒤 끝나므로 두 틱 대기.
 	//   반환 = { id, clone } (clone = detached 노드. 목업 스타일은 iframe 내부 <style> 이 살아있어 iframe 안에 append 할 때만 적용).
 	//   실패 시 null. Promise — 순회 호출자는 순차 await.
@@ -712,5 +751,5 @@ body.clean #screen-nav { display: none !important; }
 		});
 	}
 
-	return { attach, detectSpecHtml, readAppData, gotoScreen, listScreens, snapshotScreen };
+	return { attach, detectSpecHtml, readAppData, gotoScreen, listScreens, snapshotScreen, readCover, readHistory };
 })();

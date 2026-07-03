@@ -363,7 +363,16 @@ async function saveTab(asNew) {
 	const set = tab.annotations;
 	const hasAnn = !!(set && Array.isArray(set.annotations) && set.annotations.length > 0);
 	if (!hasAnn && !asNew) { showToast('저장할 주석이 없습니다', 'err'); return; } // 주석 없는 순수 목업은 저장 의미 없음(원본 미변경)
-	if (set) set.savedAt = new Date().toISOString();
+	if (set) {
+		set.savedAt = new Date().toISOString();
+		// M5.6 — 저장 시점 정책부(표지·History) 스냅샷을 목업에서 추출해 캐싱. 저장본이 목업 스크립트 없이도 표지·이력 렌더.
+		//   정책 바뀌면 목업 재생성→dd 재개봉→재저장으로 자동 갱신(동동이 확정). generic·이력 없으면 normalizeDocMeta 가 null.
+		try {
+			const cover = DDOverlay.readCover(tab.frame);
+			const history = DDOverlay.readHistory(tab.frame);
+			set.docMeta = DDModel.normalizeDocMeta({ title: cover.title, version: cover.version, history: history });
+		} catch (_) { /* 추출 실패 — 기존 docMeta 유지 */ }
+	}
 	// tab.raw(원본, dd 블록 포함 가능) 기준으로 embed — embed 가 기존 블록 strip 후 1세트만 남긴다(멱등·무손상).
 	//   runtime 인라인(M5b) — 저장본을 dd 없이 브라우저로 열어도 핀·설명이 뜨게 자기완결 뷰어를 심는다.
 	const runtime = (window.DDRuntimeSrc && { css: window.DDRuntimeSrc.RUNTIME_CSS, js: window.DDRuntimeSrc.RUNTIME_JS }) || null;
@@ -425,6 +434,14 @@ function toggleDocMode() {
 		tab.editMode = false; // 문서 뷰는 읽기 — 편집 강제 해제
 		if (tab.overlay) tab.overlay.setEditable(false);
 		else attachOverlay(tab); // 주석 있으면 읽기 오버레이 부착(핀 표시)
+		// M5.6 — 문서 뷰 진입 시 표지·History 추출(저장 전에도 보이게). 저장 시 saveTab 이 최신 스냅샷으로 재추출.
+		if (tab.annotations && !tab.annotations.docMeta) {
+			try {
+				const cover = DDOverlay.readCover(tab.frame);
+				const history = DDOverlay.readHistory(tab.frame);
+				tab.annotations.docMeta = DDModel.normalizeDocMeta({ title: cover.title, version: cover.version, history });
+			} catch (_) { /* 추출 실패 — 표지 생략 */ }
+		}
 	}
 	applyMockupChrome(tab); // 문서 뷰 = 목업 우측 화면정보(#description)까지 숨김 / 해제 시 복귀
 	syncTopbar();
@@ -928,6 +945,20 @@ function docBodyHtml(a) {
 	if (a.body && a.body.plain) return '<p>' + escapeHtml(a.body.plain) + '</p>';
 	return '<p class="doc-empty">(설명 없음)</p>';
 }
+// M5.6 — 표지·History 앞 블록 HTML (docMeta 스냅샷). 저장본 런타임(dd-runtime-src.js)과 동일 마크업 유지.
+function docFrontHtml(dm) {
+	let h = '<div class="doc-cover"><div class="doc-cover-title">' + escapeHtml(dm.title || '(제목 없음)') + '</div>';
+	if (dm.version) h += '<div class="doc-cover-ver">' + escapeHtml(dm.version) + '</div>';
+	h += '</div>';
+	if (dm.history && dm.history.length) {
+		h += '<div class="doc-hist"><div class="doc-hist-h">변경 이력</div><table class="doc-hist-tbl"><thead><tr><th>No</th><th>날짜</th><th>버전</th><th>내용</th><th>작성</th></tr></thead><tbody>';
+		for (const r of dm.history) {
+			h += '<tr><td>' + escapeHtml(r.no) + '</td><td>' + escapeHtml(r.date) + '</td><td>' + escapeHtml(r.ver) + '</td><td>' + escapeHtml(r.content) + '</td><td>' + escapeHtml(r.author) + '</td></tr>';
+		}
+		h += '</tbody></table></div>';
+	}
+	return h;
+}
 function renderDocPanel(tab) {
 	annotPanel.classList.remove('hidden');
 	annotPanel.classList.add('doc-mode');
@@ -937,6 +968,14 @@ function renderDocPanel(tab) {
 	const anns = docAnnotationsFor(tab);
 	apCount.textContent = String(anns.length);
 	annotList.innerHTML = '';
+	// M5.6 — 표지·History 앞 블록 (docMeta 있을 때 문서 뷰 최상단 1회). generic·이력 없으면 docMeta=null → 생략.
+	const dm = tab.annotations && tab.annotations.docMeta;
+	if (dm) {
+		const fli = document.createElement('li');
+		fli.className = 'doc-front';
+		fli.innerHTML = docFrontHtml(dm);
+		annotList.appendChild(fli);
+	}
 	for (const a of anns) {
 		const li = document.createElement('li');
 		li.className = 'doc-row';
