@@ -103,25 +103,46 @@ if (shortcutPopover) {
 	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setShortcutOpen(false); });
 }
 
-// 주석 패널 폭 드래그 — --ap-width 조절(최소 200 / 최대 창의 60%).
+// 드래그 실드 — 리사이즈 중 iframe(목업)이 포인터 이벤트를 삼키는 것을 전체 덮개로 차단. cursor 유지.
+//   setPointerCapture 와 이중 방어(캡처가 이벤트를, 실드가 커서 일관성을 보장).
+let _dragShield = null;
+function showDragShield(cursor) {
+	if (_dragShield) return;
+	_dragShield = document.createElement('div');
+	_dragShield.className = 'drag-shield';
+	if (cursor) _dragShield.style.cursor = cursor;
+	document.body.appendChild(_dragShield);
+}
+function hideDragShield() {
+	if (_dragShield) { _dragShield.remove(); _dragShield = null; }
+}
+
+// 주석 패널 폭 드래그 — --ap-width 조절(최소 200 / 최대 창의 60%). 포인터 캡처로 iframe 위를 지나도 안 끊김.
 if (apGutter) {
-	apGutter.addEventListener('mousedown', (e) => {
+	apGutter.addEventListener('pointerdown', (e) => {
+		if (e.button !== 0) return;
 		e.preventDefault();
+		try { apGutter.setPointerCapture(e.pointerId); } catch (_) {}
 		const startX = e.clientX;
 		const startW = annotPanel.getBoundingClientRect().width;
 		document.body.classList.add('ap-resizing');
+		showDragShield('col-resize');
 		const onMove = (ev) => {
 			let w = startW + (startX - ev.clientX); // 왼쪽 거터라 반대 방향
 			w = Math.max(200, Math.min(window.innerWidth * 0.6, w));
 			document.documentElement.style.setProperty('--ap-width', w + 'px');
 		};
 		const onUp = () => {
-			document.removeEventListener('mousemove', onMove);
-			document.removeEventListener('mouseup', onUp);
+			try { apGutter.releasePointerCapture(e.pointerId); } catch (_) {}
+			apGutter.removeEventListener('pointermove', onMove);
+			apGutter.removeEventListener('pointerup', onUp);
+			apGutter.removeEventListener('pointercancel', onUp);
 			document.body.classList.remove('ap-resizing');
+			hideDragShield();
 		};
-		document.addEventListener('mousemove', onMove);
-		document.addEventListener('mouseup', onUp);
+		apGutter.addEventListener('pointermove', onMove);
+		apGutter.addEventListener('pointerup', onUp);
+		apGutter.addEventListener('pointercancel', onUp);
 	});
 }
 
@@ -459,6 +480,7 @@ function ensureDocMeta(tab) {
 //   유령 뷰어 재발 방지 — 상태 전환은 전부 이 함수 하나를 거친다.
 function setMode(tab, mode) {
 	const edit = mode === 'edit';
+	const sel = tab.overlay ? tab.overlay.getSelected() : null; // 모드 전환 전 선택 보존(오버레이 재생성에도 살아남게)
 	tab.editMode = edit;
 	tab.docMode = !edit;
 	if (edit && !tab.annotations) { // 첫 편집 진입 시 세트 생성(spec-html 판별은 APP_DATA 유무)
@@ -467,6 +489,7 @@ function setMode(tab, mode) {
 	if (!edit) ensureDocMeta(tab); // 문서 뷰 진입 — 표지·History 추출
 	if (tab.overlay) tab.overlay.setEditable(edit);
 	else attachOverlay(tab); // 오버레이 미부착(빈 주석 등)이면 새로 시도
+	if (sel && tab.overlay) tab.overlay.select(sel); // 선택 복원 — DEL·하이라이트가 모드 왕복 후에도 동작
 	applyMockupChrome(tab); // dd-docview(문서 뷰 전용 숨김) 토글 반영
 	syncTopbar();
 }
@@ -643,15 +666,18 @@ function layoutPanes() {
 			const next = groups[i + 1];
 			const gut = document.createElement('div');
 			gut.className = 'gutter';
-			gut.addEventListener('mousedown', (e) => startGutterDrag(e, g, next));
+			gut.addEventListener('pointerdown', (e) => startGutterDrag(e, g, next, gut));
 			g.el.after(gut); // DOM 순서 = groups[] 순서 (항상 append/splice 로 일치)
 		}
 	});
 }
 
 // 거터 드래그 — 인접 두 열의 flex-grow 비율을 마우스 이동량만큼 재분배(최소 150px). 비율 기반이라 창 크기 변화에도 유지.
-function startGutterDrag(e, a, b) {
+//   포인터 캡처 + 실드로 iframe(목업) 위를 가로질러 드래그해도 안 끊김.
+function startGutterDrag(e, a, b, gut) {
+	if (e.button !== 0) return;
 	e.preventDefault();
+	try { gut.setPointerCapture(e.pointerId); } catch (_) {}
 	const aw = a.el.getBoundingClientRect().width;
 	const bw = b.el.getBoundingClientRect().width;
 	const startX = e.clientX;
@@ -659,6 +685,7 @@ function startGutterDrag(e, a, b) {
 	const combinedFlex = (a.flex || 1) + (b.flex || 1);
 	const MIN = 150; // 열 최소 폭 px
 	document.body.classList.add('col-resizing');
+	showDragShield('col-resize');
 	function onMove(ev) {
 		let aPx = aw + (ev.clientX - startX);
 		aPx = Math.max(MIN, Math.min(combinedPx - MIN, aPx));
@@ -668,12 +695,16 @@ function startGutterDrag(e, a, b) {
 		b.el.style.flexGrow = b.flex;
 	}
 	function onUp() {
-		document.removeEventListener('mousemove', onMove);
-		document.removeEventListener('mouseup', onUp);
+		try { gut.releasePointerCapture(e.pointerId); } catch (_) {}
+		gut.removeEventListener('pointermove', onMove);
+		gut.removeEventListener('pointerup', onUp);
+		gut.removeEventListener('pointercancel', onUp);
 		document.body.classList.remove('col-resizing');
+		hideDragShield();
 	}
-	document.addEventListener('mousemove', onMove);
-	document.addEventListener('mouseup', onUp);
+	gut.addEventListener('pointermove', onMove);
+	gut.addEventListener('pointerup', onUp);
+	gut.addEventListener('pointercancel', onUp);
 }
 
 // 그룹 제거 — 활성 그룹이었으면 인접 그룹을 활성화.
@@ -1425,6 +1456,8 @@ document.addEventListener('keydown', (e) => {
 	if (ctrl && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
 	const tab = activeTab();
 	const hasSel = !!(tab && tab.overlay && tab.overlay.getSelected());
+	// 삭제 — iframe 에 키 포커스가 없을 때(패널 클릭으로 선택 등)도 부모 레벨에서 확실히 동작. iframe 포커스 시엔 오버레이가 처리(이벤트 미버블 → 중복 없음).
+	if ((e.key === 'Delete' || e.key === 'Backspace') && hasSel && tab.editMode) { e.preventDefault(); removeAnnotation(tab, tab.overlay.getSelected()); return; }
 	if (ctrl && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicateSelectedPin(); return; } // 복제
 	if (ctrl && (e.key === 'c' || e.key === 'C')) { if (hasSel) { e.preventDefault(); copySelectedPin(); } return; } // 복사
 	if (ctrl && (e.key === 'v' || e.key === 'V')) { if (pinClipboard && tab && tab.editMode) { e.preventDefault(); pastePin(); } return; } // 붙여넣기

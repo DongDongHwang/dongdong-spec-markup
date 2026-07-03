@@ -399,6 +399,9 @@ kbd {
 
 .hidden { display: none !important; }
 
+/* 드래그 실드 — 패널·컬럼 리사이즈 중 iframe(목업) 위를 덮어 포인터 이벤트 유실 차단. 투명·전체 덮개. */
+.drag-shield { position: fixed; inset: 0; z-index: 99998; background: transparent; }
+
 #topbar .actions { margin-left: auto; display: flex; gap: 8px; flex: 0 0 auto; }
 #topbar .actions button {
 	padding: 5px 12px;
