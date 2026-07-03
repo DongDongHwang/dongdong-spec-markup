@@ -66,6 +66,22 @@ function pushRecent(filePath) {
 	sendRecent(arr);
 }
 
+// ---- 설정 (userData 영속) — 슬롯 템플릿 등 사용자 커스터마이즈 -----------------
+// 저장 형식 = 임의 JSON 오브젝트. 슬롯은 settings.slots = { 'app-5dim': [{key,label}], 'admin-6dim': [...] }.
+function settingsFilePath() {
+	return path.join(app.getPath('userData'), 'settings.json');
+}
+function loadSettings() {
+	try {
+		const o = JSON.parse(fs.readFileSync(settingsFilePath(), 'utf8'));
+		if (o && typeof o === 'object') return o;
+	} catch (_) {}
+	return {};
+}
+function saveSettings(obj) {
+	try { fs.writeFileSync(settingsFilePath(), JSON.stringify(obj, null, 2), 'utf8'); return true; } catch (_) { return false; }
+}
+
 // 새 창 생성. open = { file, folder } — 렌더러 준비(ready) 시점에 이 창으로 flush 한다.
 //   file   : 준비되면 이 경로를 열도록 open-path 신호
 //   folder : 준비되면 이 폴더 트리를 folder-tree 로 push (새 창이 부모 창의 폴더를 물려받기)
@@ -237,6 +253,16 @@ function reportDetectedVaults() {
 	target.webContents.send('vaults', vault.detectedVaults());
 }
 
+// 메뉴 클릭 → 포커스 창 렌더러로 신호. 키보드는 렌더러 keydown 이 단일 처리(중복 방지).
+function sendMenuSave(as) {
+	const t = focusedOrAnyWindow();
+	if (t && !t.isDestroyed()) t.webContents.send('menu-save', !!as);
+}
+function sendMenuCmd(cmd) {
+	const t = focusedOrAnyWindow();
+	if (t && !t.isDestroyed()) t.webContents.send('menu-cmd', cmd);
+}
+
 function buildMenu() {
 	const template = [
 		{
@@ -253,6 +279,10 @@ function buildMenu() {
 				{ label: '폴더 열기…', accelerator: 'CmdOrCtrl+Shift+O', click: openFolderFromMenu },
 				{ label: 'Obsidian 볼트 감지', click: reportDetectedVaults },
 				{ type: 'separator' },
+				// accelerator 는 표시용 — 실제 키 처리는 렌더러 keydown(단일). 클릭만 IPC 로.
+				{ label: '저장', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: () => sendMenuSave(false) },
+				{ label: '다른 이름으로 저장…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => sendMenuSave(true) },
+				{ type: 'separator' },
 				{ role: 'quit', label: '종료' },
 			],
 		},
@@ -266,6 +296,13 @@ function buildMenu() {
 				{ label: '확대', accelerator: 'CmdOrCtrl+Plus', registerAccelerator: false, click: (_mi, w) => applyZoom(w && w.webContents, 0.5) },
 				{ label: '축소', accelerator: 'CmdOrCtrl+-', registerAccelerator: false, click: (_mi, w) => applyZoom(w && w.webContents, -0.5) },
 				{ label: '실제 크기', accelerator: 'CmdOrCtrl+0', registerAccelerator: false, click: (_mi, w) => applyZoom(w && w.webContents, 0) },
+				{ type: 'separator' },
+				// 렌더러 UI 동작 — 키는 렌더러 keydown 이 단일 처리(registerAccelerator:false), 클릭만 IPC.
+				{ label: '편집 / 읽기 전환', accelerator: 'CmdOrCtrl+E', registerAccelerator: false, click: () => sendMenuCmd('toggle-edit') },
+				{ label: '사이드바 접기/펼치기', accelerator: 'CmdOrCtrl+Shift+B', registerAccelerator: false, click: () => sendMenuCmd('toggle-sidebar') },
+				{ label: '단축키 안내', click: () => sendMenuCmd('shortcuts') },
+				{ type: 'separator' },
+				{ label: '슬롯 편집…', click: () => sendMenuCmd('edit-slots') },
 			],
 		},
 	];
@@ -463,6 +500,9 @@ ipcMain.handle('classify-dropped', (e, p) => {
 });
 
 // 외부 URL 을 시스템 기본 브라우저로 연다 (iframe 내부 링크 네비 가드에서 호출).
+ipcMain.handle('read-settings', () => loadSettings());
+ipcMain.handle('write-settings', (_e, obj) => ({ ok: saveSettings(obj && typeof obj === 'object' ? obj : {}) }));
+
 ipcMain.handle('open-external', (_e, url) => {
 	try {
 		if (typeof url === 'string' && /^(https?:|mailto:)/i.test(url)) shell.openExternal(url);

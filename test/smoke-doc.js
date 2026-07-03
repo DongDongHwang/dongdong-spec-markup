@@ -136,7 +136,7 @@ const SPEC_SCENARIO = `(function(){
 	return {
 		total:set.annotations.length,
 		docMode:document.getElementById('layout').classList.contains('doc-mode'),
-		btnOn:document.getElementById('doc-btn').classList.contains('is-on'),
+		btnReading:(function(){var b=document.getElementById('mode-btn'); return !!b && /읽기/.test(b.textContent) && !b.classList.contains('is-on');})(),
 		rows:document.querySelectorAll('#annot-list .doc-row').length,
 		detailHidden:(!d||getComputedStyle(d).display==='none'),
 		firstBodyHasHtml:!!document.querySelector('#annot-list .doc-row .doc-body b'),
@@ -183,7 +183,7 @@ app.whenReady().then(async () => {
 	const r1 = await wc.executeJavaScript(SPEC_SCENARIO);
 	check('편집→핀 3개 주입', r1.total === 3, 'total=' + r1.total);
 	check('문서 뷰 doc-mode 클래스 ON', r1.docMode === true);
-	check('문서 뷰 버튼 is-on', r1.btnOn === true);
+	check('모드 버튼 = 읽기 상태(문서 뷰)', r1.btnReading === true);
 	check('현재 화면(S1) 소속 핀만 표에 = 2행 (S2 제외)', r1.rows === 2, 'rows=' + r1.rows + ' curScreen=' + r1.curScreen);
 	check('편집기(ap-detail) 숨김', r1.detailHidden === true);
 	check('설명 body 리치텍스트(html) 렌더', r1.firstBodyHasHtml === true);

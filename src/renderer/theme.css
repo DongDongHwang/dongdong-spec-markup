@@ -420,7 +420,7 @@ kbd {
 .sc-wrap { position: relative; display: inline-flex; }
 #shortcut-btn.is-on { color: #fff; background: var(--accent); border-color: var(--accent); }
 .sc-popover {
-	position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+	position: fixed; top: 46px; right: 12px; z-index: 200; /* 메뉴에서 여는 안내 — 상단바 우측 고정 */
 	display: flex; gap: 20px;
 	padding: 14px 18px;
 	background: var(--bg);
@@ -444,7 +444,7 @@ kbd {
 .sc-row > span kbd { min-width: 0; border-bottom-width: 1px; }
 
 /* ---- 주석 패널 (M3 번호 자유관리) ---- */
-#topbar .actions #edit-btn.is-on { color: #fff; background: var(--dd-purple); border-color: var(--dd-purple); }
+#topbar .actions #mode-btn.is-on { color: #fff; background: var(--dd-purple); border-color: var(--dd-purple); }
 .annot-panel {
 	flex: 0 0 260px;
 	display: flex;
@@ -519,7 +519,7 @@ kbd {
 }
 .ap-import:hover { background: color-mix(in srgb, var(--dd-purple) 20%, var(--bg)); }
 .ap-import-note { font-size: 11px; color: var(--muted); white-space: nowrap; align-self: center; } /* generic 목업 — 초안 없음 안내 */
-.ap-detail { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; max-height: 46%; }
+.ap-detail { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; max-height: 60%; }
 .apd-head { display: flex; align-items: center; gap: 8px; }
 .apd-label { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: var(--dd-purple); color: #fff; font-weight: 700; font-size: 11px; text-align: center; }
 .apd-name { flex: 1 1 auto; font-size: 12px; font-weight: 600; }
@@ -546,7 +546,7 @@ kbd {
 .apd-toolbar .apd-color { color: var(--dd-purple); font-weight: 700; }
 .apd-toolbar .apd-color-clear { color: var(--muted); text-decoration: line-through; }
 .apd-editor {
-	flex: 1 1 auto; min-height: 72px; overflow-y: auto;
+	flex: 1 1 auto; min-height: 120px; overflow-y: auto;
 	border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
 	font-size: 12.5px; line-height: 1.6; background: var(--bg); color: var(--fg);
 }
@@ -597,7 +597,7 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 .toast.ok { background: #18a558; }
 
 /* 설명 편집기 — 줄바꿈 유지 + 상한 스크롤(길게 써도 패널 밖으로 안 밀림) */
-.apd-editor { white-space: pre-wrap; word-break: break-word; max-height: 200px; }
+.apd-editor { white-space: pre-wrap; word-break: break-word; max-height: 340px; } /* 여러 줄 입력 그대로 보이게(엔터 보존·자동 확장) */
 
 /* ---- 패널 폭 폭발 방지 (flex min-width:auto → 긴 nowrap 텍스트가 패널을 창 밖까지 늘리던 버그) ---- */
 .annot-panel { min-width: 0; overflow: hidden; }
@@ -675,3 +675,37 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 .st-badge.st-new { background: color-mix(in srgb, #18a558 18%, var(--bg)); color: #18a558; }
 .st-badge.st-modified { background: color-mix(in srgb, #E08600 22%, var(--bg)); color: #c26f00; }
 .st-badge.st-new.st-phase { background: color-mix(in srgb, #D97706 22%, var(--bg)); color: #b45309; } /* 신규 2·3차 — 볼트 phase 황색 */
+
+/* ---- 모달 (슬롯 편집 등) — 공용 오버레이 + 카드 ---- */
+.modal-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.4); }
+.modal-overlay.hidden { display: none; }
+.modal {
+	width: 420px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column;
+	background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 12px;
+	box-shadow: 0 12px 40px rgba(0,0,0,.28); overflow: hidden;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.modal-title { font-size: 14px; font-weight: 700; }
+.modal-x { border: none; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.modal-x:hover { background: color-mix(in srgb, var(--dd-purple) 12%, transparent); color: var(--fg); }
+.modal-body { padding: 14px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.modal-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.modal-spacer { flex: 1 1 auto; }
+.btn-primary { border: none; border-radius: 7px; padding: 7px 15px; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--dd-purple); color: #fff; }
+.btn-primary:hover { background: color-mix(in srgb, var(--dd-purple) 85%, #000); }
+.btn-ghost { border: 1px solid var(--border); border-radius: 7px; padding: 7px 13px; font-size: 13px; cursor: pointer; background: transparent; color: var(--fg); }
+.btn-ghost:hover { background: color-mix(in srgb, var(--dd-purple) 8%, transparent); }
+/* 슬롯 편집 */
+.slot-tpl-pick { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.slot-tpl-pick select { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12.5px; }
+.slot-edit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.slot-edit-row { display: flex; align-items: center; gap: 8px; }
+.slot-edit-label { flex: 1 1 auto; min-width: 0; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 12.5px; }
+.slot-edit-label:focus { outline: none; border-color: var(--dd-purple); }
+.slot-edit-tag { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+.slot-edit-tag.is-custom { color: var(--dd-purple); border-color: var(--dd-purple); }
+.slot-edit-del { flex: 0 0 auto; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 5px; border-radius: 4px; }
+.slot-edit-del:hover { background: color-mix(in srgb, #E82929 14%, transparent); color: #E82929; }
+.slot-add { align-self: flex-start; border: 1px dashed var(--dd-purple); background: transparent; color: var(--dd-purple); border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.slot-add:hover { background: color-mix(in srgb, var(--dd-purple) 8%, transparent); }
+.slot-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--muted); }

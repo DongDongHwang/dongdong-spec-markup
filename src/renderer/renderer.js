@@ -11,8 +11,7 @@
 const docpath = document.getElementById('docpath');
 const splitBtn = document.getElementById('split-btn');
 const newWinBtn = document.getElementById('newwin-btn');
-const editBtn = document.getElementById('edit-btn');
-const docBtn = document.getElementById('doc-btn');
+const modeBtn = document.getElementById('mode-btn'); // 편집 ↔ 읽기 단일 토글(상태 라벨 표시)
 const saveBtn = document.getElementById('save-btn');
 const panes = document.getElementById('panes');
 const annotPanel = document.getElementById('annot-panel');
@@ -39,7 +38,6 @@ const sidebarToggle = document.getElementById('sidebar-toggle');
 const apGutter = document.getElementById('ap-gutter');
 const apCollapse = document.getElementById('ap-collapse');
 const apReopen = document.getElementById('ap-reopen');
-const shortcutBtn = document.getElementById('shortcut-btn');
 const shortcutPopover = document.getElementById('shortcut-popover');
 const toastEl = document.getElementById('toast');
 const screenSection = document.getElementById('screen-section'); // M6 화면 네비(현재 문서의 화면 목록)
@@ -74,18 +72,13 @@ function setPanelCollapsed(on) {
 if (apCollapse) apCollapse.addEventListener('click', () => setPanelCollapsed(true));
 if (apReopen) apReopen.addEventListener('click', () => setPanelCollapsed(false));
 
-// ---- 단축키 안내 팝오버 (상단바) — 정적 목록, 바깥 클릭·Esc 로 닫힘 ----
+// ---- 단축키 안내 팝오버 (보기 메뉴 › 단축키 안내) — 정적 목록, 바깥 클릭·Esc 로 닫힘 ----
 function setShortcutOpen(on) {
-	if (!shortcutPopover || !shortcutBtn) return;
+	if (!shortcutPopover) return;
 	shortcutPopover.classList.toggle('hidden', !on);
-	shortcutBtn.classList.toggle('is-on', on);
 }
-if (shortcutBtn) {
-	shortcutBtn.addEventListener('click', (e) => {
-		e.stopPropagation();
-		setShortcutOpen(shortcutPopover.classList.contains('hidden'));
-	});
-	if (shortcutPopover) shortcutPopover.addEventListener('click', (e) => e.stopPropagation());
+if (shortcutPopover) {
+	shortcutPopover.addEventListener('click', (e) => e.stopPropagation());
 	document.addEventListener('click', () => setShortcutOpen(false));
 	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setShortcutOpen(false); });
 }
@@ -133,12 +126,19 @@ const SLOT_6DIM = [
 	{ key: 'note', label: '예외·비고' },
 ];
 
+// 슬롯 템플릿 런타임 — 기본값(SLOT_5DIM/6DIM)에서 시작, settings.json 이 덮어씀(P4 슬롯 편집).
+//   기본 슬롯의 key 는 초안 자동 매핑용이라 보존, 추가 슬롯은 수동 입력 전용(custom:true).
+const SLOT_DEFAULTS = { 'app-5dim': SLOT_5DIM, 'admin-6dim': SLOT_6DIM };
+let slotTemplates = { 'app-5dim': SLOT_5DIM.slice(), 'admin-6dim': SLOT_6DIM.slice() };
+function slotsFor(name) { return slotTemplates[name] || SLOT_DEFAULTS[name] || SLOT_5DIM; }
+
 // 슬롯셋 선택 — template('admin-6dim'/'app-5dim') 우선, 없으면 fields 키로 자동 감지(어드민 6키 있으면 6dim).
+//   자동 감지는 기본 키(SLOT_DEFAULTS)로 판정하되, 반환 템플릿은 사용자 커스터마이즈 반영본.
 function slotSetOf(slots) {
-	if (slots && slots.template === 'admin-6dim') return SLOT_6DIM;
-	if (slots && slots.template === 'app-5dim') return SLOT_5DIM;
+	if (slots && slots.template === 'admin-6dim') return slotsFor('admin-6dim');
+	if (slots && slots.template === 'app-5dim') return slotsFor('app-5dim');
 	const f = (slots && slots.fields) || {};
-	return SLOT_6DIM.some((s) => (f[s.key] || '').trim()) ? SLOT_6DIM : SLOT_5DIM;
+	return SLOT_6DIM.some((s) => (f[s.key] || '').trim()) ? slotsFor('admin-6dim') : slotsFor('app-5dim');
 }
 
 // 문서 없을 때 탭에 표시하는 웰컴.
@@ -457,7 +457,7 @@ function toggleEdit() {
 	if (!tab || !tab.docPath) return;
 	setMode(tab, tab.editMode ? 'doc' : 'edit');
 }
-if (editBtn) editBtn.addEventListener('click', toggleEdit);
+if (modeBtn) modeBtn.addEventListener('click', toggleEdit); // 단일 토글 = 편집 ↔ 읽기 뒤집기
 
 // ---- 문서 뷰 토글 (M5.5) — 목업 + 우측 번호·설명 표(읽기 전용 1세대 포맷) --------------
 // 편집과 상보. 빈 주석 파일도 진입 가능(빈 상태 CTA 노출). renderAnnotPanel 이 표로 렌더.
@@ -466,7 +466,7 @@ function toggleDocMode() {
 	if (!tab || !tab.docPath) return;
 	setMode(tab, tab.docMode ? 'edit' : 'doc');
 }
-if (docBtn) docBtn.addEventListener('click', toggleDocMode);
+// 문서 뷰 토글은 이제 모드 버튼(mode-btn)·Ctrl+Shift+D·보기 메뉴가 공용으로 flip.
 
 // 활성 그룹 전환 (시각 강조·topbar 반영)
 function setActiveGroup(id) {
@@ -746,15 +746,13 @@ function syncTopbar() {
 	docpath.textContent = tab ? tab.docPath : '';
 	const hasDoc = !!(tab && tab.docPath);
 	if (splitBtn) splitBtn.disabled = !hasDoc || groups.length >= MAX_GROUPS;
-	if (editBtn) {
-		editBtn.disabled = !hasDoc;
-		editBtn.classList.toggle('is-on', !!(tab && tab.editMode));
-	}
 	const hasAnn = !!(tab && tab.annotations && tab.annotations.annotations.length > 0);
-	if (docBtn) {
-		// 문서 뷰 = 기본 읽기 상태. 주석 없어도 진입 가능(빈 상태 CTA 노출) — 문서만 있으면 활성.
-		docBtn.disabled = !hasDoc;
-		docBtn.classList.toggle('is-on', !!(tab && tab.docMode));
+	if (modeBtn) {
+		// 단일 모드 버튼 — 현재 상태를 라벨로. 편집=✏(강조 on) / 읽기=📄. 문서만 있으면 활성.
+		modeBtn.disabled = !hasDoc;
+		const editing = !!(tab && tab.editMode);
+		modeBtn.textContent = editing ? '✏ 편집' : '📄 읽기';
+		modeBtn.classList.toggle('is-on', editing);
 	}
 	if (layoutEl) layoutEl.classList.toggle('doc-mode', !!(tab && tab.docMode)); // 문서 뷰 레이아웃(우측 표 넓힘·편집 UI 숨김)
 	if (saveBtn) {
@@ -1642,4 +1640,107 @@ window.ddsv.onOpenPath((filePath) => {
 // 준비 신호 -> 볼트 목록 수신
 window.ddsv.ready().then((res) => {
 	if (res && res.vaults) showVaults(res.vaults);
+});
+
+// ---- 설정 + 슬롯 편집 (P4) --------------------------------------------------
+// settings.json(userData) 에서 슬롯 커스터마이즈를 로드해 런타임 템플릿을 덮어쓴다.
+let ddSettings = {};
+function applySlotSettings(settings) {
+	const s = settings && settings.slots;
+	if (!s || typeof s !== 'object') return;
+	for (const name of ['app-5dim', 'admin-6dim']) {
+		if (Array.isArray(s[name]) && s[name].length) {
+			slotTemplates[name] = s[name]
+				.filter((x) => x && x.key && x.label)
+				.map((x) => ({ key: String(x.key), label: String(x.label), custom: !!x.custom }));
+		}
+	}
+}
+(async () => {
+	try { ddSettings = (await window.ddsv.readSettings()) || {}; applySlotSettings(ddSettings); renderDetail(); } catch (_) {}
+})();
+
+// 보기 메뉴 명령 디스패처 — 편집전환·사이드바·단축키 안내·슬롯 편집.
+if (window.ddsv.onMenuCmd) window.ddsv.onMenuCmd((cmd) => {
+	if (cmd === 'toggle-edit') toggleEdit();
+	else if (cmd === 'toggle-sidebar') toggleSidebar();
+	else if (cmd === 'shortcuts') setShortcutOpen(!!(shortcutPopover && shortcutPopover.classList.contains('hidden')));
+	else if (cmd === 'edit-slots') openSlotModal();
+});
+
+// 슬롯 편집 모달 — 템플릿별 라벨 편집·추가·삭제. 기본 키(초안 매핑)는 보존, 추가는 custom.
+const slotModal = document.getElementById('slot-modal');
+const slotTplSel = document.getElementById('slot-tpl-sel');
+const slotEditList = document.getElementById('slot-edit-list');
+let slotDraft = null; // 편집 중 사본 { 'app-5dim': [...], 'admin-6dim': [...] }
+
+function slugKey(label, existing) {
+	let base = 'custom_' + String(label || 'slot').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+	if (base === 'custom_') base = 'custom_slot';
+	const keys = new Set(existing.map((s) => s.key));
+	let k = base, n = 2;
+	while (keys.has(k)) { k = base + '_' + n; n++; }
+	return k;
+}
+function openSlotModal() {
+	if (!slotModal) return;
+	slotDraft = {
+		'app-5dim': slotsFor('app-5dim').map((s) => ({ key: s.key, label: s.label, custom: !!s.custom })),
+		'admin-6dim': slotsFor('admin-6dim').map((s) => ({ key: s.key, label: s.label, custom: !!s.custom })),
+	};
+	renderSlotEditor();
+	slotModal.classList.remove('hidden');
+}
+function closeSlotModal() { if (slotModal) slotModal.classList.add('hidden'); }
+function renderSlotEditor() {
+	if (!slotEditList || !slotTplSel) return;
+	const rows = slotDraft[slotTplSel.value] || [];
+	slotEditList.innerHTML = '';
+	rows.forEach((row, i) => {
+		const li = document.createElement('li');
+		li.className = 'slot-edit-row';
+		const inp = document.createElement('input');
+		inp.type = 'text'; inp.value = row.label; inp.className = 'slot-edit-label'; inp.placeholder = '라벨';
+		inp.addEventListener('input', () => { row.label = inp.value; });
+		const tag = document.createElement('span');
+		tag.className = 'slot-edit-tag' + (row.custom ? ' is-custom' : '');
+		tag.textContent = row.custom ? '추가' : '기본';
+		tag.title = row.custom ? '추가 슬롯 — 수동 입력 전용' : '기본 슬롯 — 초안 자동 매핑 키 보존';
+		const del = document.createElement('button');
+		del.type = 'button'; del.className = 'slot-edit-del'; del.textContent = '✕'; del.title = '이 슬롯 삭제';
+		del.addEventListener('click', () => { rows.splice(i, 1); renderSlotEditor(); });
+		li.append(inp, tag, del);
+		slotEditList.appendChild(li);
+	});
+}
+if (slotTplSel) slotTplSel.addEventListener('change', renderSlotEditor);
+const slotAddBtn = document.getElementById('slot-add-btn');
+if (slotAddBtn) slotAddBtn.addEventListener('click', () => {
+	const rows = slotDraft[slotTplSel.value];
+	rows.push({ key: slugKey('추가', rows), label: '', custom: true });
+	renderSlotEditor();
+});
+const slotResetBtn = document.getElementById('slot-reset-btn');
+if (slotResetBtn) slotResetBtn.addEventListener('click', () => {
+	const name = slotTplSel.value;
+	slotDraft[name] = SLOT_DEFAULTS[name].map((s) => ({ key: s.key, label: s.label, custom: !!s.custom }));
+	renderSlotEditor();
+});
+const slotCancelBtn = document.getElementById('slot-cancel-btn');
+if (slotCancelBtn) slotCancelBtn.addEventListener('click', closeSlotModal);
+const slotCloseBtn = document.getElementById('slot-modal-close');
+if (slotCloseBtn) slotCloseBtn.addEventListener('click', closeSlotModal);
+if (slotModal) slotModal.addEventListener('click', (e) => { if (e.target === slotModal) closeSlotModal(); }); // 바깥 클릭 닫기
+const slotSaveBtn = document.getElementById('slot-save-btn');
+if (slotSaveBtn) slotSaveBtn.addEventListener('click', async () => {
+	for (const name of ['app-5dim', 'admin-6dim']) {
+		const clean = (slotDraft[name] || []).filter((s) => (s.label || '').trim());
+		clean.forEach((s) => { if (!s.key) s.key = slugKey(s.label, clean); });
+		slotTemplates[name] = clean.length ? clean : SLOT_DEFAULTS[name].slice();
+	}
+	ddSettings = ddSettings || {};
+	ddSettings.slots = { 'app-5dim': slotTemplates['app-5dim'], 'admin-6dim': slotTemplates['admin-6dim'] };
+	try { await window.ddsv.writeSettings(ddSettings); showToast('슬롯 설정 저장됨', 'ok'); } catch (_) { showToast('슬롯 설정 저장 실패', 'err'); }
+	closeSlotModal();
+	renderDetail(); // 편집기 열려 있으면 새 슬롯 반영
 });

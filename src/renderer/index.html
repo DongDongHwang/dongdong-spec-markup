@@ -13,7 +13,6 @@
 			<div id="docpath" class="docpath"></div>
 			<div id="actions" class="actions">
 				<span class="sc-wrap">
-					<button id="shortcut-btn" type="button" title="단축키 안내 보기">⌨ 단축키</button>
 					<div id="shortcut-popover" class="sc-popover hidden">
 						<div class="sc-col">
 							<div class="sc-cap">보기 · 파일</div>
@@ -45,8 +44,7 @@
 					</div>
 				</span>
 				<button id="sidebar-toggle" type="button" title="사이드바 접기/펼치기 (Ctrl+Shift+B)">◧ 사이드바</button>
-				<button id="edit-btn" type="button" disabled title="주석 편집 — 클릭 = 핀 · 드래그 = 박스 (Ctrl+E)">✏ 주석 편집</button>
-				<button id="doc-btn" type="button" disabled title="문서 뷰 — 목업 + 우측 번호·설명 표(읽기 전용, 1세대 기획서 포맷) (Ctrl+Shift+D)">📄 문서 뷰</button>
+				<button id="mode-btn" type="button" disabled title="편집 / 읽기 전환 (Ctrl+E) — 편집 = 핀 찍기·드래그 박스 / 읽기 = 번호·설명 표">📄 읽기</button>
 				<button id="save-btn" type="button" disabled title="주석 저장 — 원본에 주석을 심어 저장 (Ctrl+S) · Shift = 다른 이름으로">💾 저장</button>
 				<button id="newwin-btn" type="button" title="새 창 — 지금 폴더를 새 창에서 (Ctrl+N)">⧉ 새 창</button>
 				<button id="split-btn" type="button" disabled class="hidden" title="분할 — 활성 문서를 옆 열에 (Ctrl+\)">◫ 분할</button>
@@ -123,12 +121,38 @@
 					<div id="apd-editor" class="apd-editor" contenteditable="true" data-placeholder="핀 설명을 입력하세요…"></div>
 					<div id="apd-slots" class="apd-slots hidden"></div>
 				</section>
-				<div class="ap-hint">클릭 = 핀 · 드래그 = 박스 · 화면 이동은 편집을 끄고 · 전체 단축키는 상단바 <b>⌨ 단축키</b></div>
+				<div class="ap-hint">클릭 = 핀 · 드래그 = 박스 · 화면 이동은 편집을 끄고 · 전체 단축키는 <b>보기 메뉴 › 단축키 안내</b></div>
 			</aside>
 			<button id="ap-reopen" type="button" class="ap-reopen hidden" title="주석 패널 펼치기">📌 주석</button>
 		</div>
 		<div id="toast" class="toast hidden"></div>
 		<div id="drop-overlay" class="drop-overlay hidden"><span>여기에 .md 파일이나 폴더를 놓으세요</span></div>
+			<!-- 슬롯 편집 모달 (보기 메뉴 › 슬롯 편집) — 설명 슬롯 템플릿 커스터마이즈 -->
+			<div id="slot-modal" class="modal-overlay hidden">
+				<div class="modal">
+					<div class="modal-head">
+						<span class="modal-title">슬롯 편집</span>
+						<button id="slot-modal-close" type="button" class="modal-x" title="닫기">✕</button>
+					</div>
+					<div class="modal-body">
+						<label class="slot-tpl-pick">템플릿
+							<select id="slot-tpl-sel">
+								<option value="app-5dim">앱 (기본 5종)</option>
+								<option value="admin-6dim">어드민 (기본 6종)</option>
+							</select>
+						</label>
+						<ul id="slot-edit-list" class="slot-edit-list"></ul>
+						<button id="slot-add-btn" type="button" class="slot-add">+ 슬롯 추가</button>
+						<p class="slot-note">라벨을 바꾸거나 슬롯을 추가/삭제할 수 있어요. 기본 슬롯의 키(초안 자동 매핑용)는 유지되고, 추가한 슬롯은 수동 입력 전용이에요.</p>
+					</div>
+					<div class="modal-foot">
+						<button id="slot-reset-btn" type="button" class="btn-ghost">기본값 복원</button>
+						<span class="modal-spacer"></span>
+						<button id="slot-cancel-btn" type="button" class="btn-ghost">취소</button>
+						<button id="slot-save-btn" type="button" class="btn-primary">저장</button>
+					</div>
+				</div>
+			</div>
 		<!-- core 순수 모듈(UMD) → 오버레이 → 셸 순서 (오버레이가 DDAnchor·DDModel·DDNumbering, 셸이 DDHtmlIO·DDNumbering·DDOverlay 참조) -->
 		<script src="../core/anchor.js"></script>
 		<script src="../core/annotation-model.js"></script>

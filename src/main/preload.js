@@ -44,4 +44,9 @@ contextBridge.exposeInMainWorld('ddsv', {
 	saveAnnotatedCopy: (srcPath, html) => ipcRenderer.invoke('save-annotated-copy', srcPath, html),
 	// 메뉴/단축키 저장 신호 (Ctrl+S / Ctrl+Shift+S)
 	onMenuSave: (cb) => ipcRenderer.on('menu-save', (_e, as) => cb(as)),
+	// 메뉴 UI 명령 신호 (편집전환·사이드바·단축키·슬롯편집) -> cmd 문자열
+	onMenuCmd: (cb) => ipcRenderer.on('menu-cmd', (_e, cmd) => cb(cmd)),
+	// 설정 읽기/쓰기 (userData/settings.json) — 슬롯 템플릿 등
+	readSettings: () => ipcRenderer.invoke('read-settings'),
+	writeSettings: (obj) => ipcRenderer.invoke('write-settings', obj),
 });
