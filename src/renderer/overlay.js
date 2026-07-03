@@ -78,6 +78,8 @@ body:has(#${ROOT_ID}.dd-tool-text) { cursor: text !important; }
 body:has(#${ROOT_ID}.dd-tool-arrow) { cursor: crosshair !important; }
 #${ROOT_ID} .dd-arrow { position: absolute; }
 #${ROOT_ID} .dd-arrow.dd-selected .dd-arrow-line { stroke-width: 4; } /* 화살표 선택 강조 */
+#${ROOT_ID} .dd-box.dd-ellipse { border-radius: 50%; } /* 원(타원) 도형 */
+#${ROOT_ID} .dd-rubber.dd-rubber-ellipse { border-radius: 50%; } /* 원 그리기 미리보기 */
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
@@ -254,7 +256,7 @@ body.clean #screen-nav { display: none !important; }
 			let el;
 			if (a.type === 'box') {
 				el = doc.createElement('div');
-				el.className = 'dd-box';
+				el.className = 'dd-box' + (a.style && a.style.shape === 'ellipse' ? ' dd-ellipse' : ''); // 원(타원) 변형
 				const lb = doc.createElement('span');
 				lb.className = 'dd-box-label';
 				lb.textContent = a.label;
@@ -535,9 +537,9 @@ body.clean #screen-nav { display: none !important; }
 			select(a.id);
 			notifyChange();
 		}
-		function createBox(absRect) {
+		function createBox(absRect, shape) {
 			const hit = boxAnchorFor(absRect);
-			const a = DDModel.createAnnotation({ type: 'box', anchor: hit.anchor, coord: hit.coord, style: { variant: 'dashed', color: '#7460D9' } });
+			const a = DDModel.createAnnotation({ type: 'box', anchor: hit.anchor, coord: hit.coord, style: { variant: 'dashed', color: '#7460D9', shape: shape === 'ellipse' ? 'ellipse' : 'rect' } });
 			DDNumbering.add(set, a);
 			rebuildNodes();
 			layout();
@@ -716,7 +718,7 @@ body.clean #screen-nav { display: none !important; }
 				}
 				if (!gesture.rubber) {
 					gesture.rubber = doc.createElement('div');
-					gesture.rubber.className = 'dd-rubber';
+					gesture.rubber.className = 'dd-rubber' + (tool === 'ellipse' ? ' dd-rubber-ellipse' : '');
 					root.appendChild(gesture.rubber);
 				}
 				const left = Math.min(gesture.sx, e.clientX);
@@ -746,8 +748,9 @@ body.clean #screen-nav { display: none !important; }
 				const top = Math.min(g.sy, e.clientY);
 				const w = Math.abs(e.clientX - g.sx);
 				const h = Math.abs(e.clientY - g.sy);
-				if (w >= DRAG_MIN && h >= DRAG_MIN) createBox({ left, top, width: w, height: h });
+				if (w >= DRAG_MIN && h >= DRAG_MIN) createBox({ left, top, width: w, height: h }, tool === 'ellipse' ? 'ellipse' : 'rect');
 			} else {
+				if (tool === 'ellipse') return; // 원 도구는 드래그 전용(클릭 무시)
 				createPin(g.sx, g.sy);
 			}
 		}
@@ -836,7 +839,7 @@ body.clean #screen-nav { display: none !important; }
 			getSelectedClone,   // 복사용 deep clone
 			addClone,           // 붙여넣기·복제 — 새 id·오프셋 추가
 			nudgeSelected,      // 화살표 미세 이동
-			setTool(name) { tool = (name === 'text' || name === 'arrow') ? name : 'annot'; root.classList.toggle('dd-tool-text', tool === 'text'); root.classList.toggle('dd-tool-arrow', tool === 'arrow'); }, // 도구 전환(주석/텍스트/화살표)
+			setTool(name) { tool = ['text', 'arrow', 'ellipse'].indexOf(name) >= 0 ? name : 'annot'; root.classList.toggle('dd-tool-text', tool === 'text'); root.classList.toggle('dd-tool-arrow', tool === 'arrow' || tool === 'ellipse'); }, // 도구 전환(주석/텍스트/화살표/원)
 			getTool: () => tool,
 			// 패널(셸) 쪽 구조 변경(삭제·재번호·라벨) 후 호출 — 노드 전체 재생성 + 재배치
 			refresh() {

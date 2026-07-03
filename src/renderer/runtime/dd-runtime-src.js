@@ -34,6 +34,7 @@
 #dd-overlay-root .dd-text { position: absolute; transform: none; max-width: 240px; padding: 4px 8px; box-sizing: border-box; background: rgba(255,255,255,.94); color: #1f2328; border: 1px solid #7460D9; border-radius: 6px; font: 600 12px/1.45 Pretendard, -apple-system, sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,.2); white-space: pre-wrap; word-break: break-word; pointer-events: auto; cursor: pointer; }
 #dd-overlay-root .dd-arrow { position: absolute; }
 #dd-overlay-root .dd-arrow.dd-active .dd-arrow-line { stroke-width: 4; }
+#dd-overlay-root .dd-box.dd-ellipse { border-radius: 50%; }
 #dd-overlay-root .dd-pin.dd-st-new { background: #18a558; }
 #dd-overlay-root .dd-pin.dd-st-modified { background: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
@@ -260,7 +261,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 						return;
 					}
 				if (a.type === 'box') {
-					el = doc.createElement('div'); el.className = 'dd-box';
+					el = doc.createElement('div'); el.className = 'dd-box' + (a.style && a.style.shape === 'ellipse' ? ' dd-ellipse' : '');
 					var lb = doc.createElement('span'); lb.className = 'dd-box-label'; lb.textContent = a.label; el.appendChild(lb);
 				} else {
 					el = doc.createElement('div'); el.className = 'dd-pin'; el.textContent = a.label;

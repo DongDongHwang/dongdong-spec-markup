@@ -24,19 +24,22 @@ const apTools = document.getElementById('ap-tools');
 const toolAnnotBtn = document.getElementById('tool-annot');
 const toolTextBtn = document.getElementById('tool-text');
 const toolArrowBtn = document.getElementById('tool-arrow');
-// 편집 도구 — 'annot'(핀·박스) | 'text'(캔버스 텍스트) | 'arrow'(화살표). 오버레이에 전달.
+const toolEllipseBtn = document.getElementById('tool-ellipse');
+// 편집 도구 — 'annot'(핀·박스) | 'text' | 'arrow' | 'ellipse'(원). 오버레이에 전달.
 let activeTool = 'annot';
 function setTool(name) {
-	activeTool = (name === 'text' || name === 'arrow') ? name : 'annot';
+	activeTool = ['text', 'arrow', 'ellipse'].indexOf(name) >= 0 ? name : 'annot';
 	const tab = activeTab();
 	if (tab && tab.overlay) tab.overlay.setTool(activeTool);
 	if (toolAnnotBtn) toolAnnotBtn.classList.toggle('is-on', activeTool === 'annot');
 	if (toolTextBtn) toolTextBtn.classList.toggle('is-on', activeTool === 'text');
 	if (toolArrowBtn) toolArrowBtn.classList.toggle('is-on', activeTool === 'arrow');
+	if (toolEllipseBtn) toolEllipseBtn.classList.toggle('is-on', activeTool === 'ellipse');
 }
 if (toolAnnotBtn) toolAnnotBtn.addEventListener('click', () => setTool('annot'));
 if (toolTextBtn) toolTextBtn.addEventListener('click', () => setTool('text'));
 if (toolArrowBtn) toolArrowBtn.addEventListener('click', () => setTool('arrow'));
+if (toolEllipseBtn) toolEllipseBtn.addEventListener('click', () => setTool('ellipse'));
 const apDetail = document.getElementById('ap-detail');
 const apdLabel = document.getElementById('apd-label');
 const apdName = document.getElementById('apd-name');
