@@ -21,7 +21,7 @@ const DDOverlay = (() => {
 #${ROOT_ID} .dd-pin {
 	position: absolute; transform: translate(-50%, -50%);
 	min-width: 22px; height: 22px; padding: 0 5px; box-sizing: border-box;
-	display: flex; align-items: center; justify-content: center;
+	display: flex; align-items: center; justify-content: center; white-space: nowrap;
 	background: #7460D9; color: #fff; border: 2px solid #fff; border-radius: 999px;
 	font: 700 11px/1 Pretendard, -apple-system, sans-serif;
 	box-shadow: 0 1px 4px rgba(0,0,0,.35); pointer-events: auto; cursor: default; user-select: none;

@@ -18,7 +18,7 @@
 #dd-overlay-root .dd-pin {
 	position: absolute; transform: translate(-50%, -50%);
 	min-width: 22px; height: 22px; padding: 0 5px; box-sizing: border-box;
-	display: flex; align-items: center; justify-content: center;
+	display: flex; align-items: center; justify-content: center; white-space: nowrap;
 	background: #7460D9; color: #fff; border: 2px solid #fff; border-radius: 999px;
 	font: 700 11px/1 Pretendard, -apple-system, sans-serif;
 	box-shadow: 0 1px 4px rgba(0,0,0,.35); pointer-events: auto; cursor: pointer; user-select: none;
@@ -287,7 +287,11 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 			for (var j = 0; j < sa.length; j++) {
 				(function (a) {
 					var li = doc.createElement('li'); li.className = 'dd-p-row'; li.setAttribute('data-dd-id', a.id);
-					var lst = annStatus(a), lbadge = (lst === 'new' || lst === 'modified') ? '<span class="dd-p-badge dd-b-' + lst + '">' + annBadgeLabel(a) + '</span>' : '';
+					var lst = annStatus(a);
+					// 색 SSOT 정합 — 신규 배지는 차수색(statusCol)을 핀과 동일하게 인라인(저장본 배경=흰색). 수정은 클래스 유지.
+					var lbadge = '';
+					if (lst === 'new') { var bc = statusCol(a); lbadge = '<span class="dd-p-badge dd-b-new" style="color:' + bc + ';background:color-mix(in srgb,' + bc + ' 18%,#fff)">' + annBadgeLabel(a) + '</span>'; }
+					else if (lst === 'modified') { lbadge = '<span class="dd-p-badge dd-b-modified">' + annBadgeLabel(a) + '</span>'; }
 					var lgc = isGrp(a) ? groupCol(grpKey(a)) : null; // 그룹색(1-A/1-B)
 					var numStyle = lgc ? ' style="background:' + lgc + ';color:#fff"' : '';
 					var lcap = (a.mark && (a.mark.addedAt || a.mark.reason)) ? '<div class="dd-p-mark" style="color:' + statusCol(a) + '">' + escHtml(annTip(a)) + '</div>' : ''; // 날짜·사유

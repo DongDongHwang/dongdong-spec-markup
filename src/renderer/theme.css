@@ -530,8 +530,9 @@ kbd {
 .apd-mark-cap { font-size: 10.5px; font-weight: 700; color: var(--muted); }
 .apd-mk-btn { border: 1px solid var(--border); background: var(--bg); color: var(--muted); border-radius: 4px; font-size: 11px; padding: 2px 9px; cursor: pointer; }
 .apd-mk-btn:hover { border-color: var(--dd-purple); }
+/* 마킹 버튼 색 = 핀 색 SSOT 정합 — 신규 초록(#18a558=차수1)·기존 회색(#6B7280). 보라(dd 브랜드색)는 상태색 아님 */
 #apd-mk-new.is-on { border-color: #18a558; background: #18a558; color: #fff; }
-#apd-mk-old.is-on { border-color: var(--dd-purple); background: var(--dd-purple); color: #fff; }
+#apd-mk-old.is-on { border-color: #6B7280; background: #6B7280; color: #fff; }
 .apd-mark-extra { display: inline-flex; align-items: center; gap: 4px; flex: 1 1 100%; }
 .apd-mk-phase, .apd-mk-date { border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 4px; font-size: 11px; padding: 2px 5px; }
 .apd-mk-reason { flex: 1 1 auto; min-width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); border-radius: 4px; font-size: 11px; padding: 2px 6px; }

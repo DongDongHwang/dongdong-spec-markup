@@ -777,8 +777,14 @@ function statusBadgeEl(a) {
 	const badge = DDModel.annotBadge(a); // { status, label } — 마킹 우선(신규·2차 등), 없으면 origin 폴백
 	if (badge.status !== 'new' && badge.status !== 'modified') return null;
 	const b = document.createElement('span');
-	b.className = 'st-badge st-' + badge.status + ((a.mark && a.mark.phase >= 2) ? ' st-phase' : '');
+	b.className = 'st-badge st-' + badge.status;
 	b.textContent = badge.label;
+	// 색 SSOT 정합 — 신규 배지는 차수색(1차 초록·2차 주황·3차 청록…)을 핀과 동일하게 인라인으로. (st-phase 하드코딩 대체)
+	if (badge.status === 'new') {
+		const c = DDModel.statusColor(a);
+		b.style.color = c;
+		b.style.background = `color-mix(in srgb, ${c} 18%, var(--bg))`;
+	}
 	return b;
 }
 
