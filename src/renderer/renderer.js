@@ -20,6 +20,7 @@ const annotList = document.getElementById('annot-list');
 const apCount = document.getElementById('ap-count');
 const apPullback = document.getElementById('ap-pullback');
 const apImport = document.getElementById('ap-import');
+const apImportNote = document.getElementById('ap-import-note');
 const apDetail = document.getElementById('ap-detail');
 const apdLabel = document.getElementById('apd-label');
 const apdName = document.getElementById('apd-name');
@@ -258,6 +259,7 @@ function attachOverlay(tab) {
 		onScreenChange: () => { renderAnnotPanel(); renderScreenNav(); }, // 화면 전환 시 패널·네비 재렌더(편집·문서 모두 현재 화면 주석으로)
 
 		onDeleteRequest: (id) => removeAnnotation(tab, id),
+		onTrayNav: (id) => navToAnnotation(tab, id),
 		onCopy: () => copySelectedPin(),
 		onPaste: () => pastePin(),
 		onDuplicate: () => duplicateSelectedPin(),
@@ -336,6 +338,20 @@ function applyMockupChrome(tab) {
 		if (DDOverlay.detectSpecHtml(tab.frame)) doc.body.classList.add('clean');
 		doc.body.classList.toggle('dd-docview', !!tab.docMode);
 	} catch (_) { /* iframe 접근 불가(문서 교체 중) — 무시 */ }
+}
+
+// 트레이 칩 클릭 — 숨은 주석의 화면으로 이동 + 선택. spec-html(screenId)은 goScreen 브리지로 전환 가능,
+//   generic(screenSel)은 목업 자체 토글이라 프로그램 전환 불가 → 안내만.
+function navToAnnotation(tab, id) {
+	const a = tab.annotations && tab.annotations.annotations.find((x) => x.id === id);
+	if (!a) return;
+	const sid = a.anchor && a.anchor.screenId;
+	if (sid) {
+		DDOverlay.gotoScreen(tab.frame, sid); // 화면 전환 → onScreenChange 가 패널·네비 갱신
+		if (tab.overlay) tab.overlay.select(id);
+	} else {
+		showToast('이 주석은 목업에서 해당 화면으로 직접 넘겨야 보여요', 'err');
+	}
 }
 
 // 주석 삭제 — 당김 여부는 패널 체크박스가 결정. 오버레이 Delete 키·패널 × 공용.
@@ -787,10 +803,11 @@ function renderAnnotPanel() {
 	}
 	// 패널이 접혀 있으면 재열기 버튼 노출
 	if (apReopen) apReopen.classList.toggle('hidden', !layoutEl.classList.contains('panel-collapsed'));
-	// 초안 불러오기 — 편집 모드 + spec-html 목업(APP_DATA)일 때만. generic 목업엔 숨김(불변 원칙).
+	// 초안 불러오기 — 편집 모드 + spec-html 목업(APP_DATA)일 때만. generic 목업엔 버튼 대신 "왜 없는지" 힌트.
 	if (apImport) {
 		const canImport = !!(tab.editMode && DDOverlay.readAppData(tab.frame));
 		apImport.classList.toggle('hidden', !canImport);
+		if (apImportNote) apImportNote.classList.toggle('hidden', !(tab.editMode && !canImport)); // 편집 중 generic 목업이면 안내 노출
 	}
 	apCount.textContent = String(anns.length);
 	annotList.innerHTML = '';

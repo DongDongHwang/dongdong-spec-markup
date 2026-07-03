@@ -518,6 +518,7 @@ kbd {
 	border-radius: 6px; font-size: 11px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap;
 }
 .ap-import:hover { background: color-mix(in srgb, var(--dd-purple) 20%, var(--bg)); }
+.ap-import-note { font-size: 11px; color: var(--muted); white-space: nowrap; align-self: center; } /* generic 목업 — 초안 없음 안내 */
 .ap-detail { border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; max-height: 46%; }
 .apd-head { display: flex; align-items: center; gap: 8px; }
 .apd-label { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: var(--dd-purple); color: #fff; font-weight: 700; font-size: 11px; text-align: center; }

@@ -59,6 +59,9 @@ const DDOverlay = (() => {
 #${ROOT_ID} .dd-rubber { position: absolute; border: 2px dashed #7460D9; background: rgba(116,96,217,.10); pointer-events: none; }
 #${ROOT_ID}.dd-editing .dd-pin, #${ROOT_ID}.dd-editing .dd-box, #${ROOT_ID}.dd-editing .dd-box-label { cursor: move; }
 #${ROOT_ID}:not(.dd-editing) .dd-pin, #${ROOT_ID}:not(.dd-editing) .dd-box-label { cursor: pointer; } /* 읽기 모드 = 클릭해 설명 보기 */
+/* 드래그 중 앵커 예측 — 요소에 붙음(초록·따라감) / 좌표에 고정(회색 점선) */
+#${ROOT_ID}.dd-editing .dd-will-element { outline: 3px solid rgba(24,165,88,.75); outline-offset: 3px; }
+#${ROOT_ID}.dd-editing .dd-will-coord { outline: 3px dashed rgba(107,114,128,.85); outline-offset: 3px; }
 #${ROOT_ID}.dd-editing .dd-box { pointer-events: auto; }
 body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 .dd-tray {
@@ -67,6 +70,8 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 	border-radius: 8px; font: 500 11px/1.5 Pretendard, -apple-system, sans-serif; pointer-events: none;
 }
 .dd-tray b { color: #fff; }
+.dd-tray .dd-tray-chip { pointer-events: auto; cursor: pointer; text-decoration: underline; color: #fff; } /* 트레이 배경은 클릭 통과, 칩만 클릭 가능 */
+.dd-tray .dd-tray-chip:hover { color: #a5b4fc; }
 /* 문서 뷰 — 목업 자체 우측 화면정보(#description: 요약·화면 전환·사용법)를 숨겨 dd 설명 표와 중복 제거.
    spec-html 전용 id 라 generic 목업엔 무효(무해). area-rail·el-pin·매핑은 body.clean 이 담당. */
 body.dd-docview #description { display: none !important; }
@@ -198,6 +203,11 @@ body.clean #screen-nav { display: none !important; }
 		tray.className = 'dd-tray';
 		tray.style.display = 'none';
 		root.appendChild(tray);
+		// 트레이 칩 클릭 — 숨은 주석의 화면으로 이동(위임). layout 이 innerHTML 을 매번 갈아끼워도 리스너는 유지.
+		tray.addEventListener('click', (e) => {
+			const chip = e.target && e.target.closest ? e.target.closest('.dd-tray-chip') : null;
+			if (chip && chip.dataset.ddId && opts.onTrayNav) opts.onTrayNav(chip.dataset.ddId);
+		});
 
 		function annotations() { return Array.isArray(set.annotations) ? set.annotations : []; }
 
@@ -294,7 +304,7 @@ body.clean #screen-nav { display: none !important; }
 			const rootRect = root.getBoundingClientRect();
 			const screen = currentScreen();
 			if (screen !== lastScreen) { lastScreen = screen; if (opts.onScreenChange) opts.onScreenChange(screen); }
-			const hiddenLabels = [];
+			const hidden = [];
 			let visible = 0;
 			for (const a of annotations()) {
 				const node = nodes.get(a.id);
@@ -324,7 +334,7 @@ body.clean #screen-nav { display: none !important; }
 				}
 				if (!abs) {
 					node.style.display = 'none';
-					hiddenLabels.push(a.label);
+					hidden.push({ id: a.id, label: a.label });
 					continue;
 				}
 				node.style.display = '';
@@ -337,13 +347,14 @@ body.clean #screen-nav { display: none !important; }
 				visible++;
 			}
 			// 숨은 주석 트레이 — 화면 전환·조건분기로 빠진 핀을 보존 중임을 알린다(돌아오면 자동 복귀)
-			if (hiddenLabels.length) {
+			if (hidden.length) {
 				tray.style.display = '';
-				tray.innerHTML = `<b>숨김 ${hiddenLabels.length}</b> · 다른 화면/상태의 주석: ${hiddenLabels.join(', ')}`;
+				const chips = hidden.map((h) => `<span class="dd-tray-chip" data-dd-id="${h.id}" title="클릭 — 이 주석의 화면으로 이동">${h.label}</span>`).join(', ');
+				tray.innerHTML = `<b>숨김 ${hidden.length}</b> · 다른 화면/상태: ${chips}`;
 			} else {
 				tray.style.display = 'none';
 			}
-			lastStats = { visible, hidden: hiddenLabels.length };
+			lastStats = { visible, hidden: hidden.length };
 		}
 
 		// rAF 디바운스 — 이벤트 폭주(스크롤·연쇄 변이)를 프레임당 1회로 합친다.
@@ -551,6 +562,10 @@ body.clean #screen-nav { display: none !important; }
 				const top = gesture.ny + dy - rootRect.top + (isPin ? gesture.node.offsetHeight / 2 : 0);
 				gesture.node.style.left = left + 'px';
 				gesture.node.style.top = top + 'px';
+				// 앵커 예측 힌트 — 지금 놓으면 요소에 붙는지(초록·따라감) 좌표에 고정되는지(회색·고정) 실시간 표시.
+				const willEl = elementUnderPoint(e.clientX, e.clientY);
+				gesture.node.classList.toggle('dd-will-element', !!willEl);
+				gesture.node.classList.toggle('dd-will-coord', !willEl);
 			} else {
 				if (!gesture.rubber) {
 					gesture.rubber = doc.createElement('div');
@@ -571,6 +586,7 @@ body.clean #screen-nav { display: none !important; }
 			gesture = null;
 			dragNodeId = null;
 			if (g.kind === 'move') {
+				g.node.classList.remove('dd-will-element', 'dd-will-coord'); // 드래그 힌트 해제
 				if (g.moved) reanchor(g.a, g.node);
 				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
 			}
