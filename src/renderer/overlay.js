@@ -98,6 +98,18 @@ body:has(#${ROOT_ID}.dd-editing) { cursor: crosshair !important; }
 body.dd-docview #description { display: none !important; }
 /* 목업 자체 좌측 화면목록(#screen-nav)은 dd 좌측 화면 네비가 대체 — clean 일 때 숨김(화면 1급화). */
 body.clean #screen-nav { display: none !important; }
+/* 트랜스폼 핸들 — box·ellipse·text 8방향 리사이즈(Figma식). 선택 + 편집 모드일 때만 노출. */
+#${ROOT_ID} .dd-handle { position: absolute; width: 10px; height: 10px; margin: -5px; box-sizing: border-box; background: #fff; border: 1.5px solid #7460D9; border-radius: 2px; pointer-events: auto; display: none; z-index: 6; }
+#${ROOT_ID}.dd-editing .dd-selected > .dd-handle { display: block; }
+#${ROOT_ID} .dd-text.dd-editing-text > .dd-handle { display: none !important; } /* 인라인 편집 중엔 숨김(캐럿 방해·선택 오염 방지) */
+#${ROOT_ID} .dd-h-nw { left: 0; top: 0; cursor: nwse-resize; }
+#${ROOT_ID} .dd-h-n  { left: 50%; top: 0; cursor: ns-resize; }
+#${ROOT_ID} .dd-h-ne { left: 100%; top: 0; cursor: nesw-resize; }
+#${ROOT_ID} .dd-h-e  { left: 100%; top: 50%; cursor: ew-resize; }
+#${ROOT_ID} .dd-h-se { left: 100%; top: 100%; cursor: nwse-resize; }
+#${ROOT_ID} .dd-h-s  { left: 50%; top: 100%; cursor: ns-resize; }
+#${ROOT_ID} .dd-h-sw { left: 0; top: 100%; cursor: nesw-resize; }
+#${ROOT_ID} .dd-h-w  { left: 0; top: 50%; cursor: ew-resize; }
 `;
 
 	// element 모드 대상 조회 — CSS.escape 폴백 포함(구형 환경 방어).
@@ -255,6 +267,16 @@ body.clean #screen-nav { display: none !important; }
 			if (gc && a.type !== 'box') el.style.boxShadow = '0 0 0 2px #fff, 0 0 0 4px ' + gc + ', 0 1px 4px rgba(0,0,0,.35)';
 			else if (gc) el.style.outline = '2px solid ' + gc;
 		}
+		// 8방향 리사이즈 핸들 부착 — box·ellipse·text 전용. 선택 + 편집 시 CSS 로 노출.
+		const HANDLE_DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+		function addHandles(el) {
+			for (const d of HANDLE_DIRS) {
+				const h = doc.createElement('div');
+				h.className = 'dd-handle dd-h-' + d;
+				h.dataset.ddDir = d;
+				el.appendChild(h);
+			}
+		}
 		function makeNode(a) {
 			let el;
 			if (a.type === 'box') {
@@ -271,7 +293,10 @@ body.clean #screen-nav { display: none !important; }
 				el.textContent = (a.body && a.body.plain) || '';
 				el.addEventListener('input', function () { // 인라인 편집 중 저장(편집 중인 노드만)
 					if (editingTextId !== a.id) return;
-					a.body = { format: 'html', html: el.innerHTML, plain: el.textContent || '' };
+					// 리사이즈 핸들(.dd-handle)은 저장 본문에서 제외 — clone 에서 떼고 innerHTML 추출(저장물 무오염).
+					const clone = el.cloneNode(true);
+					clone.querySelectorAll('.dd-handle').forEach((h) => h.remove());
+					a.body = { format: 'html', html: clone.innerHTML, plain: clone.textContent || '' };
 					notifyChange();
 				});
 			} else if (a.type === 'arrow') {
@@ -298,6 +323,7 @@ body.clean #screen-nav { display: none !important; }
 				el.className = 'dd-pin';
 				el.textContent = a.label;
 			}
+			if (a.type === 'box' || a.type === 'text') addHandles(el); // 리사이즈 핸들(box·ellipse·text)
 			el.dataset.ddId = a.id;
 			const plain = a.body && a.body.plain;
 			if (a.type !== 'text' && a.type !== 'arrow') { // 배지·색·차수·날짜는 번호 주석(pin/box)만
@@ -436,6 +462,8 @@ body.clean #screen-nav { display: none !important; }
 				if (a.type === 'box') {
 					node.style.width = Math.max(0, abs.width) + 'px';
 					node.style.height = Math.max(0, abs.height) + 'px';
+				} else if (a.type === 'text' && a.style && a.style.width) {
+					node.style.width = a.style.width + 'px'; // 리사이즈된 텍스트 폭(px). 높이는 내용 맞춤(auto).
 				}
 				visible++;
 			}
@@ -697,6 +725,19 @@ body.clean #screen-nav { display: none !important; }
 						kind: 'arrow', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
 						end: handle ? handle.dataset.ddEnd : null, // '1'|'2' 단일 끝점 / null 전체 이동
 						p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, // 드래그 시작 시점의 viewport 끝점
+						rootRect: root.getBoundingClientRect(), // 드래그 동안 1회 캐시(매 move 재측정 제거)
+					};
+					dragNodeId = a.id;
+					return;
+				}
+				// box·text 리사이즈 핸들 잡음 — 이동 대신 크기 조절 제스처.
+				const dhandle = (a.type === 'box' || a.type === 'text') && e.target && e.target.closest ? e.target.closest('.dd-handle') : null;
+				if (dhandle) {
+					const r = ddEl.getBoundingClientRect();
+					gesture = {
+						kind: 'resize', a, node: ddEl, dir: dhandle.dataset.ddDir, sx: e.clientX, sy: e.clientY, moved: false,
+						start: { left: r.left, top: r.top, width: r.width, height: r.height },
+						rootRect: root.getBoundingClientRect(),
 					};
 					dragNodeId = a.id;
 					return;
@@ -706,10 +747,11 @@ body.clean #screen-nav { display: none !important; }
 					kind: 'move', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
 					// 노드 좌상단(viewport) — 이동량을 root 상대 px 로 되적용하기 위한 기준
 					nx: nr.left, ny: nr.top,
+					rootRect: root.getBoundingClientRect(),
 				};
 				dragNodeId = a.id;
 			} else {
-				gesture = { kind: 'create', sx: e.clientX, sy: e.clientY, moved: false, rubber: null };
+				gesture = { kind: 'create', sx: e.clientX, sy: e.clientY, moved: false, rubber: null, rootRect: root.getBoundingClientRect() };
 			}
 		}
 		function onMouseMove(e) {
@@ -718,9 +760,19 @@ body.clean #screen-nav { display: none !important; }
 			const dy = e.clientY - gesture.sy;
 			if (!gesture.moved && Math.abs(dx) < DRAG_MIN && Math.abs(dy) < DRAG_MIN) return;
 			gesture.moved = true;
-			const rootRect = root.getBoundingClientRect();
-			if (gesture.kind === 'arrow') { // 화살표 이동 — 몸통(양끝) 또는 한 끝만 델타 적용
-				const g = gesture;
+			gesture.lastX = e.clientX; gesture.lastY = e.clientY; // 최신 좌표만 저장 — DOM 갱신은 rAF 프레임당 1회
+			if (!gesture.raf) gesture.raf = win.requestAnimationFrame(applyDragFrame);
+		}
+		// rAF 배칭 — 마지막 포인터 좌표로 이동/리사이즈/러버밴드를 프레임당 1회만 갱신(이벤트 폭주 → 레이아웃 thrash 제거).
+		//   rootRect·elementUnderPoint 를 매 mousemove 대신 여기서 처리해 버벅임을 없앤다.
+		function applyDragFrame() {
+			if (!gesture) return;
+			const g = gesture;
+			g.raf = 0;
+			const cx = g.lastX, cy = g.lastY;
+			const dx = cx - g.sx, dy = cy - g.sy;
+			const rootRect = g.rootRect;
+			if (g.kind === 'arrow') { // 화살표 이동 — 몸통(양끝) 또는 한 끝만 델타 적용
 				const m1 = (g.end === '2') ? 0 : 1, m2 = (g.end === '1') ? 0 : 1; // 이동 대상 끝점 마스크
 				const nx1 = g.p1.x - rootRect.left + dx * m1, ny1 = g.p1.y - rootRect.top + dy * m1;
 				const nx2 = g.p2.x - rootRect.left + dx * m2, ny2 = g.p2.y - rootRect.top + dy * m2;
@@ -730,54 +782,90 @@ body.clean #screen-nav { display: none !important; }
 				if (hs[1]) { hs[1].setAttribute('cx', nx2); hs[1].setAttribute('cy', ny2); }
 				return;
 			}
-			if (gesture.kind === 'move') {
-				const isPin = gesture.node.classList.contains('dd-pin');
-				// 핀은 translate(-50%,-50%) 라 중심 기준, 박스는 좌상단 기준으로 되적용
-				const left = gesture.nx + dx - rootRect.left + (isPin ? gesture.node.offsetWidth / 2 : 0);
-				const top = gesture.ny + dy - rootRect.top + (isPin ? gesture.node.offsetHeight / 2 : 0);
-				gesture.node.style.left = left + 'px';
-				gesture.node.style.top = top + 'px';
-				// 앵커 예측 힌트 — 지금 놓으면 요소에 붙는지(초록·따라감) 좌표에 고정되는지(회색·고정) 실시간 표시.
-				const willEl = elementUnderPoint(e.clientX, e.clientY);
-				gesture.node.classList.toggle('dd-will-element', !!willEl);
-				gesture.node.classList.toggle('dd-will-coord', !willEl);
-			} else {
-				if (tool === 'text') return; // 텍스트 도구는 드래그(러버밴드) 없음 — 클릭 지점에 생성
-				if (tool === 'arrow') { // 화살표 미리보기 — 시작→현재 점선 라인
-					if (!gesture.arrowPrev) {
-						const svg = doc.createElementNS(SVGNS, 'svg');
-						svg.setAttribute('class', 'dd-arrow-prev'); svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.pointerEvents = 'none'; svg.style.overflow = 'visible';
-						const ln = doc.createElementNS(SVGNS, 'line'); ln.setAttribute('stroke', '#7460D9'); ln.setAttribute('stroke-width', '2.5'); ln.setAttribute('stroke-dasharray', '5 4');
-						svg.appendChild(ln); root.appendChild(svg);
-						gesture.arrowPrev = { svg, ln };
-					}
-					gesture.arrowPrev.svg.setAttribute('width', rootRect.width); gesture.arrowPrev.svg.setAttribute('height', rootRect.height);
-					gesture.arrowPrev.ln.setAttribute('x1', gesture.sx - rootRect.left); gesture.arrowPrev.ln.setAttribute('y1', gesture.sy - rootRect.top);
-					gesture.arrowPrev.ln.setAttribute('x2', e.clientX - rootRect.left); gesture.arrowPrev.ln.setAttribute('y2', e.clientY - rootRect.top);
-					return;
-				}
-				if (!gesture.rubber) {
-					gesture.rubber = doc.createElement('div');
-					gesture.rubber.className = 'dd-rubber' + (tool === 'ellipse' ? ' dd-rubber-ellipse' : '');
-					root.appendChild(gesture.rubber);
-				}
-				const left = Math.min(gesture.sx, e.clientX);
-				const top = Math.min(gesture.sy, e.clientY);
-				gesture.rubber.style.left = (left - rootRect.left) + 'px';
-				gesture.rubber.style.top = (top - rootRect.top) + 'px';
-				gesture.rubber.style.width = Math.abs(dx) + 'px';
-				gesture.rubber.style.height = Math.abs(dy) + 'px';
+			if (g.kind === 'resize') { // box·text 리사이즈 — dir 별 좌상단/폭/높이 재계산(최소 12px 가드)
+				const s = g.start, dir = g.dir, MIN = 12;
+				let left = s.left, top = s.top, width = s.width, height = s.height;
+				if (dir.indexOf('e') >= 0) width = s.width + dx;
+				if (dir.indexOf('s') >= 0) height = s.height + dy;
+				if (dir.indexOf('w') >= 0) { width = s.width - dx; left = s.left + dx; }
+				if (dir.indexOf('n') >= 0) { height = s.height - dy; top = s.top + dy; }
+				if (width < MIN) { if (dir.indexOf('w') >= 0) left = s.left + (s.width - MIN); width = MIN; }
+				if (height < MIN) { if (dir.indexOf('n') >= 0) top = s.top + (s.height - MIN); height = MIN; }
+				g.node.style.left = (left - rootRect.left) + 'px';
+				g.node.style.top = (top - rootRect.top) + 'px';
+				g.node.style.width = width + 'px';
+				if (g.a.type === 'box') g.node.style.height = height + 'px'; // 텍스트 높이는 내용 맞춤(auto)
+				return;
 			}
+			if (g.kind === 'move') {
+				const isPin = g.node.classList.contains('dd-pin');
+				// 핀은 translate(-50%,-50%) 라 중심 기준, 박스는 좌상단 기준으로 되적용
+				const left = g.nx + dx - rootRect.left + (isPin ? g.node.offsetWidth / 2 : 0);
+				const top = g.ny + dy - rootRect.top + (isPin ? g.node.offsetHeight / 2 : 0);
+				g.node.style.left = left + 'px';
+				g.node.style.top = top + 'px';
+				// 앵커 예측 힌트 — 지금 놓으면 요소에 붙는지(초록·따라감) 좌표에 고정되는지(회색·고정) 실시간 표시.
+				const willEl = elementUnderPoint(cx, cy);
+				g.node.classList.toggle('dd-will-element', !!willEl);
+				g.node.classList.toggle('dd-will-coord', !willEl);
+				return;
+			}
+			// create
+			if (tool === 'text') return; // 텍스트 도구는 드래그(러버밴드) 없음 — 클릭 지점에 생성
+			if (tool === 'arrow') { // 화살표 미리보기 — 시작→현재 점선 라인
+				if (!g.arrowPrev) {
+					const svg = doc.createElementNS(SVGNS, 'svg');
+					svg.setAttribute('class', 'dd-arrow-prev'); svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.pointerEvents = 'none'; svg.style.overflow = 'visible';
+					const ln = doc.createElementNS(SVGNS, 'line'); ln.setAttribute('stroke', '#7460D9'); ln.setAttribute('stroke-width', '2.5'); ln.setAttribute('stroke-dasharray', '5 4');
+					svg.appendChild(ln); root.appendChild(svg);
+					g.arrowPrev = { svg, ln };
+				}
+				g.arrowPrev.svg.setAttribute('width', rootRect.width); g.arrowPrev.svg.setAttribute('height', rootRect.height);
+				g.arrowPrev.ln.setAttribute('x1', g.sx - rootRect.left); g.arrowPrev.ln.setAttribute('y1', g.sy - rootRect.top);
+				g.arrowPrev.ln.setAttribute('x2', cx - rootRect.left); g.arrowPrev.ln.setAttribute('y2', cy - rootRect.top);
+				return;
+			}
+			if (!g.rubber) {
+				g.rubber = doc.createElement('div');
+				g.rubber.className = 'dd-rubber' + (tool === 'ellipse' ? ' dd-rubber-ellipse' : '');
+				root.appendChild(g.rubber);
+			}
+			const left = Math.min(g.sx, cx);
+			const top = Math.min(g.sy, cy);
+			g.rubber.style.left = (left - rootRect.left) + 'px';
+			g.rubber.style.top = (top - rootRect.top) + 'px';
+			g.rubber.style.width = Math.abs(dx) + 'px';
+			g.rubber.style.height = Math.abs(dy) + 'px';
 		}
 		function onMouseUp(e) {
 			if (!editable || !gesture) return;
 			const g = gesture;
+			if (g.raf) { win.cancelAnimationFrame(g.raf); g.raf = 0; } // 대기 중 rAF 취소
+			if (g.moved && (g.kind === 'move' || g.kind === 'resize' || g.kind === 'arrow' || g.kind === 'create')) {
+				g.lastX = e.clientX; g.lastY = e.clientY;
+				applyDragFrame(); // 마지막 프레임 강제 적용 — 노드가 최종 포인터 위치를 반영하게(드롭 재앵커 정확도)
+			}
 			gesture = null;
 			dragNodeId = null;
 			if (g.kind === 'move') {
 				g.node.classList.remove('dd-will-element', 'dd-will-coord'); // 드래그 힌트 해제
 				if (g.moved) reanchor(g.a, g.node);
 				return; // 미이동 = 선택만(이미 mousedown 에서 처리)
+			}
+			if (g.kind === 'resize') { // box·text 리사이즈 드롭 — 최종 rect 를 앵커(rectPct/coord) 또는 텍스트 폭으로 확정
+				if (g.moved) {
+					const r = g.node.getBoundingClientRect();
+					if (g.a.type === 'box') {
+						const hit = boxAnchorFor({ left: r.left, top: r.top, width: r.width, height: r.height });
+						g.a.anchor = hit.anchor; g.a.coord = hit.coord;
+					} else { // text — 폭(px) 저장 + 좌상단 재앵커. 높이는 내용 맞춤(auto).
+						g.a.style = Object.assign({}, g.a.style, { width: Math.round(r.width) });
+						const hit = pinAnchorAt(r.left, r.top);
+						g.a.anchor = hit.anchor; g.a.coord = hit.coord;
+					}
+					layout(); notifyChange();
+				}
+				return;
 			}
 			if (g.kind === 'arrow') { // 화살표 드롭 — 이동한 끝점만 새 위치에서 재판정(요소↔좌표 자동)
 				if (g.moved) {
@@ -903,7 +991,7 @@ body.clean #screen-nav { display: none !important; }
 			setEditable(on) {
 				editable = !!on;
 				root.classList.toggle('dd-editing', editable);
-				if (!editable) { endTextEdit(); gesture = null; dragNodeId = null; select(null); tool = 'annot'; root.classList.remove('dd-tool-text', 'dd-tool-arrow'); } // 편집 끄면 인라인 편집·도구 기본 복귀
+				if (!editable) { endTextEdit(); gesture = null; dragNodeId = null; tool = 'annot'; root.classList.remove('dd-tool-text', 'dd-tool-arrow'); applySelection(); } // 편집 끄면 인라인 편집·도구 기본 복귀. 선택은 유지(모드 왕복해도 DEL·하이라이트 살아있게) — 핸들은 CSS(.dd-editing)로 자동 숨김
 			},
 			detach() {
 				try {
