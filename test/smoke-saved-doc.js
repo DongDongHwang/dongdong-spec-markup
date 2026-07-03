@@ -104,6 +104,40 @@ app.whenReady().then(async () => {
 	const r3 = await wc.executeJavaScript(`(function(){ document.querySelectorAll('#dd-panel .dd-p-btns .dd-p-toggle')[0].click(); return { rows:document.querySelectorAll('#dd-panel .dd-p-row').length }; })()`);
 	check('전체 보기 복귀 → 3행', r3.rows === 3, 'rows=' + r3.rows);
 
+	console.log('== M5.6c 전 화면 인쇄 (페이지 스택 조립 — win.print 없이 스택만 검증) ==');
+	// __ddBuildPrintStack = 각 화면 전환→rAF2→스테이지 클론+핀 굽기+설명표. 표지 앞 페이지.
+	const rp = await wc.executeJavaScript(`window.__ddBuildPrintStack().then(function(stack){
+		var pages = stack.querySelectorAll('.dd-print-page');
+		var p1 = pages[1], p2 = pages[2];
+		return {
+			isPromiseOk: true,
+			pageCount: pages.length,
+			hasCover: !!stack.querySelector('.dd-print-cover'),
+			coverTitle: (stack.querySelector('.dd-print-cover .dd-cover-title')||{}).textContent,
+			histRows: stack.querySelectorAll('.dd-print-cover .dd-hist-tbl tbody tr').length,
+			hd1: p1 ? p1.querySelector('.dd-print-hd').textContent : '',
+			hd2: p2 ? p2.querySelector('.dd-print-hd').textContent : '',
+			s1pins: p1 ? p1.querySelectorAll('.dd-sp-pin, .dd-sp-box').length : -1,
+			s2pins: p2 ? p2.querySelectorAll('.dd-sp-pin, .dd-sp-box').length : -1,
+			s1cloneEl: p1 ? !!p1.querySelector('[data-element-id="S1-EL-001"]') : false,
+			s1desc: p1 ? p1.querySelectorAll('.dd-print-desc tbody tr').length : -1,
+			s2desc: p2 ? p2.querySelectorAll('.dd-print-desc tbody tr').length : -1,
+			curRestored: (typeof APP_DATA !== 'undefined' && APP_DATA) ? APP_DATA.currentScreen : null
+		};
+	})`);
+	check('스택 = 표지1 + 화면2 = 3페이지', rp.pageCount === 3, 'pageCount=' + rp.pageCount);
+	check('표지 페이지 존재', rp.hasCover === true);
+	check('표지 제목 = docMeta.title', rp.coverTitle === '테스트 기능', 'coverTitle=' + rp.coverTitle);
+	check('표지 History 표 1행', rp.histRows === 1, 'histRows=' + rp.histRows);
+	check('S1 페이지 헤더 = 화면 1', rp.hd1 === '화면 1', 'hd1=' + rp.hd1);
+	check('S2 페이지 헤더 = 화면 2', rp.hd2 === '화면 2', 'hd2=' + rp.hd2);
+	check('S1 페이지 핀 2개 굽힘', rp.s1pins === 2, 's1pins=' + rp.s1pins);
+	check('S2 페이지 핀 1개(좌표) 굽힘', rp.s2pins === 1, 's2pins=' + rp.s2pins);
+	check('S1 클론에 목업 요소 보존(data-element-id)', rp.s1cloneEl === true);
+	check('S1 설명표 2행', rp.s1desc === 2, 's1desc=' + rp.s1desc);
+	check('S2 설명표 1행', rp.s2desc === 1, 's2desc=' + rp.s2desc);
+	check('조립 후 원래 화면(S2) 복귀', rp.curRestored === 'S2', 'cur=' + rp.curRestored);
+
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
 }).catch((e) => { console.log('SMOKE ERROR ' + (e && e.stack ? e.stack : e)); app.exit(1); });

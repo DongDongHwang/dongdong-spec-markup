@@ -76,6 +76,45 @@ body.dd-docview #description { display: none !important; }
 /* 문서 뷰에서 목업 자체 화면 네비 복원 — clean 이 숨긴 걸 되살려 저장본에서 화면 넘김 가능(dd 자체 네비 없이 목업 nav 재활용) */
 body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: revert !important; }
 @media print { #dd-panel { position: static; width: auto; box-shadow: none; border: none; } #dd-overlay-root .dd-pin { box-shadow: none; } }
+/* M5.6c 전 화면 인쇄 — 페이지 스택(평소 숨김, 🖨 전체 인쇄 시만 조립·노출). 저장본이 목업 자체라 iframe 스타일 격리 없음. */
+#dd-print-stack { display: none; }
+.dd-print-page { padding: 8mm 6mm; box-sizing: border-box; }
+.dd-print-hd { font: 700 14px/1.4 Pretendard, -apple-system, "Malgun Gothic", sans-serif; color: #1f2328; border-bottom: 2px solid #7460D9; padding-bottom: 4px; margin: 0 0 8px; }
+.dd-print-wrap { display: flex; gap: 12px; align-items: flex-start; }
+.dd-print-mock { flex: 0 0 auto; }
+.dd-print-stagebox { position: relative; overflow: hidden; background: #fff; }
+.dd-print-desc { flex: 1 1 auto; min-width: 0; }
+.dd-print-desc table { width: 100%; border-collapse: collapse; font: 11px/1.5 -apple-system, "Malgun Gothic", sans-serif; }
+.dd-print-desc th, .dd-print-desc td { border: 1px solid #e5e7eb; padding: 4px 6px; text-align: left; vertical-align: top; }
+.dd-print-desc th { background: rgba(116,96,217,.08); font-weight: 700; }
+.dd-print-desc .dd-pd-num { width: 34px; text-align: center; font-weight: 700; color: #7460D9; }
+.dd-print-cover .dd-cover-title { font-size: 22px; font-weight: 800; line-height: 1.35; }
+.dd-print-cover .dd-cover-ver { margin-top: 6px; font-size: 13px; font-weight: 700; color: #7460D9; }
+.dd-print-cover .dd-hist-h { font-size: 12px; font-weight: 700; margin: 18px 0 4px; }
+.dd-print-cover .dd-hist-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.dd-print-cover .dd-hist-tbl th, .dd-print-cover .dd-hist-tbl td { border: 1px solid #e5e7eb; padding: 3px 5px; text-align: left; vertical-align: top; }
+.dd-print-cover .dd-hist-tbl th { background: rgba(116,96,217,.08); font-weight: 700; }
+/* 인쇄 스택 정적 핀 — #dd-overlay-root 스코프 밖이라 자기완결로 재정의(상태색은 인라인). */
+.dd-print-stagebox .dd-sp-pin {
+	position: absolute; transform: translate(-50%, -50%);
+	min-width: 22px; height: 22px; padding: 0 5px; box-sizing: border-box;
+	display: flex; align-items: center; justify-content: center;
+	background: #7460D9; color: #fff; border: 2px solid #fff; border-radius: 999px;
+	font: 700 11px/1 Pretendard, -apple-system, sans-serif; white-space: nowrap;
+}
+.dd-print-stagebox .dd-sp-box { position: absolute; border: 2px dashed #7460D9; border-radius: 4px; background: rgba(116,96,217,.06); }
+.dd-print-stagebox .dd-sp-box .dd-sp-lb {
+	position: absolute; left: -2px; top: -20px; min-width: 20px; height: 18px; padding: 0 5px; box-sizing: border-box;
+	display: inline-flex; align-items: center; justify-content: center;
+	background: #7460D9; color: #fff; border-radius: 4px 4px 4px 0;
+	font: 700 10px/1 Pretendard, -apple-system, sans-serif;
+}
+@media print {
+	body.dd-printing > *:not(#dd-print-stack) { display: none !important; }
+	body.dd-printing #dd-print-stack { display: block !important; }
+	.dd-print-page { break-after: page; page-break-after: always; }
+	.dd-print-page:last-child { break-after: auto; page-break-after: auto; }
+}
 `;
 
 	// 저장본 안에서 실행될 본체 — 외부 스코프 참조 없음(toString 직렬화 안전). document 만 의존.
@@ -206,9 +245,12 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		var headBtns = doc.createElement('span'); headBtns.className = 'dd-p-btns';
 		var docBtn = doc.createElement('button'); docBtn.className = 'dd-p-toggle'; docBtn.textContent = '문서 뷰';
 		docBtn.title = '현재 화면 소속 핀만 표로 (인쇄/PDF 대응)';
+		var printBtn = doc.createElement('button'); printBtn.className = 'dd-p-toggle'; printBtn.textContent = '🖨 전체 인쇄';
+		printBtn.title = '모든 화면을 페이지로 쌓아 인쇄/PDF (1세대 기획서 포맷 — 화면명·목업·설명표)';
 		var toggle = doc.createElement('button'); toggle.className = 'dd-p-toggle'; toggle.textContent = '접기';
-		headBtns.appendChild(docBtn); headBtns.appendChild(toggle);
+		headBtns.appendChild(docBtn); headBtns.appendChild(printBtn); headBtns.appendChild(toggle);
 		head.appendChild(headBtns);
+		printBtn.addEventListener('click', function () { runPrintAll(); });
 		toggle.addEventListener('click', function () {
 			var c = panel.classList.toggle('dd-collapsed'); toggle.textContent = c ? '펼치기' : '접기';
 		});
@@ -323,6 +365,164 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 			if (typeof win.ResizeObserver === 'function') { var ro = new win.ResizeObserver(schedule); ro.observe(doc.documentElement); if (doc.body) ro.observe(doc.body); }
 		} catch (e) {}
 		layout();
+
+		// ---- M5.6c 전 화면 인쇄 (페이지 스택) — 저장본 우선. 각 화면을 "화면명·목업·설명표" 1페이지로 쌓아 인쇄/PDF ----
+		// 화면 목록 = 신버전 APP_DATA.screens(SSOT). 없으면 현재 1장 폴백(generic 전환함수 제각각 → v1 범위 밖, dd 앱 클론 인프라와 동일 방침).
+		function listScreensRT() {
+			try {
+				if (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) {
+					return Object.keys(APP_DATA.screens).map(function (k) {
+						var s = APP_DATA.screens[k] || {};
+						return { id: s.id || k, name: s.name || s.id || k };
+					}).filter(function (s) { return s.id; });
+				}
+			} catch (e) {}
+			return [];
+		}
+		// 화면 전환 = 목업 goScreen(전역 함수) 우선, 없으면 nav 요소 click 폴백. 저장본은 목업 자체 문서라 goScreen 이 살아있다.
+		function gotoScreenRT(id) {
+			try { if (typeof goScreen === 'function') { goScreen(id); return true; } } catch (e) {}
+			var nav = doc.querySelector('[data-screen="' + esc(id) + '"]');
+			if (nav) { nav.click(); return true; }
+			return false;
+		}
+		function raf2() { return new Promise(function (r) { win.requestAnimationFrame(function () { win.requestAnimationFrame(r); }); }); }
+		function stageOf() {
+			return doc.querySelector('#wireframe') || doc.querySelector('.frame-stage')
+				|| doc.querySelector('.mobile-frame') || doc.querySelector('.web-frame') || doc.body;
+		}
+		// 라이브(전환된 화면) 기준 핀 절대좌표 → 스테이지 상대. layout() 의 abs 계산 판박이(root 대신 stageRect 기준).
+		function pinAbsRel(a, stageRect) {
+			var abs = null;
+			if (a.anchor && a.anchor.mode === 'element') {
+				var target = queryEl(a.anchor.elementId);
+				if (renderable(target)) {
+					var r = target.getBoundingClientRect();
+					var rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+					abs = a.type === 'box' ? boxRect(rect, a.anchor.rectPct) : pinPoint(rect, a.anchor.offsetPct);
+				}
+			} else if (a.coord) {
+				var base = basisEl(a.coord.basis);
+				if (renderable(base) || base === doc.body) {
+					var br = base.getBoundingClientRect();
+					abs = coordRect(a.coord, { left: br.left, top: br.top, width: br.width, height: br.height });
+				}
+			}
+			if (!abs) return null;
+			return { left: abs.left - stageRect.left, top: abs.top - stageRect.top, width: abs.width || 0, height: abs.height || 0 };
+		}
+		// 정적 핀 노드(인쇄용 — 클릭·추종 없음, 시각만). 상태색은 인라인, 모양은 .dd-print-stagebox 스코프 CSS.
+		function buildStaticPin(a, rel) {
+			var el, lb = null;
+			if (a.type === 'box') {
+				el = doc.createElement('div'); el.className = 'dd-sp-box';
+				lb = doc.createElement('span'); lb.className = 'dd-sp-lb'; lb.textContent = a.label; el.appendChild(lb);
+				el.style.width = Math.max(0, rel.width) + 'px'; el.style.height = Math.max(0, rel.height) + 'px';
+			} else {
+				el = doc.createElement('div'); el.className = 'dd-sp-pin'; el.textContent = a.label;
+			}
+			el.style.left = rel.left + 'px'; el.style.top = rel.top + 'px';
+			var pst = annStatus(a);
+			var fill = pst === 'new' ? phaseCol(a.mark && a.mark.phase ? a.mark.phase : 1) : (pst === 'modified' ? '#E08600' : (a.style && a.style.color ? a.style.color : '#7460D9'));
+			if (a.type === 'box') { el.style.borderColor = fill; if (lb) lb.style.background = fill; }
+			else el.style.background = fill;
+			return el;
+		}
+		// 한 화면의 핀 목록 — screen 지정 시 그 screenId, 폴백(null)이면 지금 보이는 화면 기준(screenId·generic screenSel·무관 좌표핀).
+		function pinsFor(screen) {
+			var sa = sortedAnns();
+			if (screen && screen.id) {
+				return sa.filter(function (a) { return a.anchor && a.anchor.screenId === screen.id; });
+			}
+			var cur = curScreen();
+			return sa.filter(function (a) {
+				var sid = a.anchor && a.anchor.screenId; if (sid) return cur ? sid === cur : true;
+				var ssel = a.anchor && a.anchor.screenSel; if (ssel) return renderable(doc.querySelector(ssel));
+				return true;
+			});
+		}
+		// 번호+설명 표(1세대 Description 표). 상태 배지는 인라인색.
+		function buildDescTable(pins) {
+			var box = doc.createElement('div'); box.className = 'dd-print-desc';
+			if (!pins.length) { box.innerHTML = '<div style="color:#9aa0a6;font-size:11px">(이 화면 주석 없음)</div>'; return box; }
+			var h = '<table><thead><tr><th class="dd-pd-num">#</th><th>설명</th></tr></thead><tbody>';
+			for (var i = 0; i < pins.length; i++) {
+				var a = pins[i];
+				var badge = (annStatus(a) !== 'unchanged') ? ' <span style="font-size:9px;font-weight:700;color:' + statusCol(a) + '">[' + annBadgeLabel(a) + ']</span>' : '';
+				h += '<tr><td class="dd-pd-num">' + escHtml(a.label) + '</td><td>' + slotHtml(a) + badge + '</td></tr>';
+			}
+			h += '</tbody></table>';
+			box.innerHTML = h;
+			return box;
+		}
+		// 라이브(현재 전환된) 화면을 1페이지로 — 스테이지 클론 + 핀 굽기 + 설명표.
+		function buildScreenPageLive(screen) {
+			var page = doc.createElement('section'); page.className = 'dd-print-page';
+			var hd = doc.createElement('div'); hd.className = 'dd-print-hd';
+			hd.textContent = screen ? (screen.name || screen.id) : (curScreen() || '화면');
+			page.appendChild(hd);
+			var wrap = doc.createElement('div'); wrap.className = 'dd-print-wrap';
+			var live = stageOf();
+			var stageRect = live.getBoundingClientRect();
+			var stagebox = doc.createElement('div'); stagebox.className = 'dd-print-stagebox';
+			stagebox.style.width = stageRect.width + 'px'; stagebox.style.height = stageRect.height + 'px';
+			var clone = live.cloneNode(true);
+			var jroot = clone.querySelector ? clone.querySelector('#dd-overlay-root') : null; if (jroot && jroot.parentNode) jroot.parentNode.removeChild(jroot);
+			clone.style.position = 'absolute'; clone.style.left = '0'; clone.style.top = '0'; clone.style.margin = '0';
+			stagebox.appendChild(clone);
+			var pins = pinsFor(screen);
+			for (var i = 0; i < pins.length; i++) {
+				var rel = pinAbsRel(pins[i], stageRect);
+				if (!rel) continue;
+				stagebox.appendChild(buildStaticPin(pins[i], rel));
+			}
+			var mock = doc.createElement('div'); mock.className = 'dd-print-mock'; mock.appendChild(stagebox);
+			wrap.appendChild(mock);
+			wrap.appendChild(buildDescTable(pins));
+			page.appendChild(wrap);
+			return page;
+		}
+		// 전 화면 스택 조립(비동기 — 화면마다 전환 후 rAF 2틱 대기, M5.6a 검증 타이밍). 표지·History 앞 페이지.
+		function buildPrintStack() {
+			var stack = doc.createElement('div'); stack.id = 'dd-print-stack';
+			if (set.docMeta) {
+				var cover = doc.createElement('section'); cover.className = 'dd-print-page dd-print-cover';
+				cover.innerHTML = docFrontHtml(set.docMeta);
+				stack.appendChild(cover);
+			}
+			var screens = listScreensRT();
+			if (screens.length === 0) { stack.appendChild(buildScreenPageLive(null)); return Promise.resolve(stack); }
+			var saved = curScreen();
+			var i = 0;
+			function step() {
+				if (i >= screens.length) {
+					if (saved) gotoScreenRT(saved);
+					return raf2().then(function () { return stack; });
+				}
+				gotoScreenRT(screens[i].id);
+				return raf2().then(function () { stack.appendChild(buildScreenPageLive(screens[i])); i++; return step(); });
+			}
+			return step();
+		}
+		var printing = false;
+		function runPrintAll() {
+			if (printing) return; printing = true;
+			buildPrintStack().then(function (stack) {
+				doc.body.appendChild(stack);
+				doc.body.classList.add('dd-printing');
+				function cleanup() {
+					try { if (stack.parentNode) stack.parentNode.removeChild(stack); } catch (e) {}
+					doc.body.classList.remove('dd-printing');
+					win.removeEventListener('afterprint', cleanup);
+					printing = false;
+					layout();
+				}
+				win.addEventListener('afterprint', cleanup);
+				win.requestAnimationFrame(function () { win.requestAnimationFrame(function () { try { win.print(); } catch (e) { cleanup(); } }); });
+			}).catch(function () { printing = false; });
+		}
+		win.__ddPrintAll = runPrintAll; // 스모크 훅(헤드리스에서 스택 조립만 검증)
+		win.__ddBuildPrintStack = buildPrintStack; // 스모크 훅
 	}
 
 	// DOM 준비 시 실행하는 부트스트랩까지 포함해 직렬화.
