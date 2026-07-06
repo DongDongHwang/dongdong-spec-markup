@@ -10,7 +10,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	const DD_VERSION = 5;               // v5 — 커넥터(arrow.connect{from,to}) 도입. v4 = docMeta. v1~v4 는 migrate 로 승격.
+	const DD_VERSION = 6;               // v6 — 화면 플로우맵(flowMap: 화면 노드 + goScreen 간선). v5=커넥터·v4=docMeta. v1~v5 는 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
 	const TYPES = ['pin', 'box', 'text', 'arrow']; // text·arrow = 번호 없는 캔버스 요소(시퀀스·계층 제외). arrow = 두 끝점(anchor+anchor2)
 	const ANCHOR_MODES = ['element', 'coord'];
@@ -61,8 +61,87 @@
 			savedAt: '',
 			source: { kind: SOURCE_KINDS.includes(sourceKind) ? sourceKind : 'generic' },
 			docMeta: null,
+			flowMap: null,   // 화면 플로우맵(노드+간선). null=미생성/없음(generic·화면개념 없음). 문서 뷰 앞 페이지에 렌더.
 			annotations: [],
 		};
+	}
+
+	// ---- 화면 플로우맵 (v6) — 문서 뷰 앞 페이지의 화면 흐름도. 자동 초안 + 사람 확정 편집(복사-편집 모델). ----
+	//   nodes = 화면명 박스(canvas 0~1 비율 좌상단 x,y). edges = goScreen 간선(from/to = 노드 id, label = 조건).
+	//   좌표는 화면과 무관한 독립 캔버스 비율(반응형·줌 견딤). 목업 재생성에도 flowMap 은 세트에 보존(불변).
+	function genFlowId(prefix, rng) {
+		const rand = rng || Math.random;
+		let s = '';
+		while (s.length < 6) s += Math.floor(rand() * 36).toString(36);
+		return (prefix || 'fn') + '_' + s.slice(0, 6);
+	}
+
+	// 플로우 노드 1건 — screenId 로 화면과 연결(라벨은 화면명 스냅샷). x,y = 캔버스 비율 좌상단.
+	function createFlowNode(props, rng) {
+		const p = props || {};
+		return {
+			id: p.id || genFlowId('fn', rng),
+			screenId: p.screenId != null ? String(p.screenId) : null, // 대응 화면(있으면). null=자유 노드
+			label: p.label != null ? String(p.label) : '',
+			x: typeof p.x === 'number' ? p.x : 0,
+			y: typeof p.y === 'number' ? p.y : 0,
+		};
+	}
+	// 플로우 간선 1건 — from/to = 노드 id. label = 조건("로그인 시" 등). origin: draft(초안 파싱) | manual(직접).
+	function createFlowEdge(props, rng) {
+		const p = props || {};
+		return {
+			id: p.id || genFlowId('fe', rng),
+			from: p.from != null ? String(p.from) : null,
+			to: p.to != null ? String(p.to) : null,
+			label: p.label != null ? String(p.label) : '',
+			origin: p.origin === 'manual' ? 'manual' : 'draft',
+		};
+	}
+
+	// 화면 목록 → 노드 그리드 자동 배치(초안). screens = [{id,name}]. cols 열로 균등 배치(캔버스 0~1 비율).
+	//   자동 초안일 뿐 — 이후 사람이 드래그로 확정(복사-편집). 빈 목록이면 빈 배열.
+	function layoutFlowNodes(screens, opts) {
+		const list = Array.isArray(screens) ? screens.filter((s) => s && s.id) : [];
+		if (!list.length) return [];
+		const o = opts || {};
+		const cols = o.cols && o.cols > 0 ? o.cols : Math.min(3, list.length); // 기본 최대 3열
+		const rows = Math.ceil(list.length / cols);
+		// 셀 중앙에 배치되도록 여백(마진) 준 균등 그리드. 노드 좌상단 기준이라 셀폭의 일부를 뺀 위치.
+		const marginX = 0.06, marginY = 0.06;
+		const cellW = (1 - marginX * 2) / cols;
+		const cellH = rows > 0 ? (1 - marginY * 2) / rows : 0;
+		return list.map((s, i) => {
+			const col = i % cols, row = Math.floor(i / cols);
+			return createFlowNode({
+				screenId: s.id,
+				label: s.name || s.id,
+				x: +(marginX + col * cellW + cellW * 0.12).toFixed(4),
+				y: +(marginY + row * cellH + cellH * 0.15).toFixed(4),
+			}, o.rng);
+		});
+	}
+
+	// 초안 플로우맵 조립 — 화면 목록으로 노드 그리드 + (파싱된) 간선. edges 는 호출자(DOM 파서)가 넘긴 [{from:screenId,to:screenId,label}].
+	//   edges 의 screenId 쌍을 노드 id 로 매핑(양끝 다 노드가 있을 때만 채택). 파싱 못 하면 노드만(사람이 간선 그림).
+	function buildFlowDraft(screens, screenEdges, opts) {
+		const nodes = layoutFlowNodes(screens, opts);
+		const byScreen = {};
+		for (const n of nodes) if (n.screenId) byScreen[n.screenId] = n.id;
+		const edges = [];
+		const seen = {};
+		if (Array.isArray(screenEdges)) {
+			for (const e of screenEdges) {
+				if (!e || e.from == null || e.to == null) continue;
+				const f = byScreen[String(e.from)], t = byScreen[String(e.to)];
+				if (!f || !t || f === t) continue; // 양끝 노드 있고 자기연결 아님
+				const key = f + '>' + t + '|' + (e.label || '');
+				if (seen[key]) continue; // 같은 from>to+라벨 중복 제거
+				seen[key] = 1;
+				edges.push(createFlowEdge({ from: f, to: t, label: e.label != null ? String(e.label) : '', origin: 'draft' }, opts && opts.rng));
+			}
+		}
+		return { nodes, edges };
 	}
 
 	// 문서 메타 정규화 — 목업에서 뽑은 raw(OVERVIEW·HISTORY)를 안전한 스키마로 다듬는다(순수 로직·DOM 무관).
@@ -150,6 +229,7 @@
 		if (!set || typeof set !== 'object') return set;
 		if (typeof set.ddVersion === 'number' && set.ddVersion < DD_VERSION) set.ddVersion = DD_VERSION;
 		if (!('docMeta' in set)) set.docMeta = null;
+		if (!('flowMap' in set)) set.flowMap = null; // v5 이하 저장본엔 flowMap 키 없음 → null 로 채움(옵셔널)
 		// generic 오저장 복구 — screenId 에 CSS 셀렉터(#·. 시작)가 든 건 옛 tagScreen 버그(generic 화면을 screenId 로 저장).
 		//   화면 넘김 게이팅이 깨지므로 screenSel 로 이동. spec-html screenId(S1·LGN-001 등)는 영향 없음.
 		if (Array.isArray(set.annotations)) {
@@ -217,12 +297,40 @@
 		return errs;
 	}
 
+	// 플로우맵 검증 — 오류 문자열 배열(비면 통과). null 은 통과(옵셔널). 간선 from/to 는 실재 노드 id 여야.
+	function validateFlowMap(fm) {
+		if (fm == null) return [];
+		if (typeof fm !== 'object') return ['flowMap: 객체|null 이어야 함'];
+		const errs = [];
+		if (!Array.isArray(fm.nodes)) errs.push('flowMap.nodes: 배열 필수');
+		if (!Array.isArray(fm.edges)) errs.push('flowMap.edges: 배열 필수');
+		const ids = new Set();
+		if (Array.isArray(fm.nodes)) {
+			fm.nodes.forEach((n, i) => {
+				if (!n || typeof n !== 'object') { errs.push(`flowMap.nodes[${i}]: 객체가 아님`); return; }
+				if (typeof n.id !== 'string' || !n.id) errs.push(`flowMap.nodes[${i}].id: 필수 문자열`);
+				else { if (ids.has(n.id)) errs.push(`flowMap.nodes[${i}].id: 중복 (${n.id})`); ids.add(n.id); }
+				if (typeof n.x !== 'number' || typeof n.y !== 'number') errs.push(`flowMap.nodes[${i}]: x/y 숫자 필수`);
+			});
+		}
+		if (Array.isArray(fm.edges)) {
+			fm.edges.forEach((e, i) => {
+				if (!e || typeof e !== 'object') { errs.push(`flowMap.edges[${i}]: 객체가 아님`); return; }
+				if (typeof e.id !== 'string' || !e.id) errs.push(`flowMap.edges[${i}].id: 필수 문자열`);
+				if (!e.from || !ids.has(e.from)) errs.push(`flowMap.edges[${i}].from: 실재 노드 id 여야 함`);
+				if (!e.to || !ids.has(e.to)) errs.push(`flowMap.edges[${i}].to: 실재 노드 id 여야 함`);
+			});
+		}
+		return errs;
+	}
+
 	// 세트 전체 검증 — { ok, errors }.
 	function validateSet(set) {
 		const errs = [];
 		if (!set || typeof set !== 'object') return { ok: false, errors: ['세트가 객체가 아님'] };
 		if (!(set.ddVersion >= 1 && set.ddVersion <= DD_VERSION)) errs.push(`ddVersion: 1~${DD_VERSION} 이어야 함 (현재 ${set.ddVersion})`); // v1 저장본 수용 → migrate 로 승격
 		if (set.docMeta != null && typeof set.docMeta !== 'object') errs.push('docMeta: 객체|null 이어야 함'); // 정책부 스냅샷(옵셔널)
+		errs.push(...validateFlowMap(set.flowMap)); // 플로우맵(옵셔널)
 		if (!Array.isArray(set.annotations)) errs.push('annotations: 배열 필수');
 		else {
 			const seen = new Set();
@@ -237,5 +345,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, normalizeDocMeta, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, normalizeDocMeta, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate, genFlowId, createFlowNode, createFlowEdge, layoutFlowNodes, buildFlowDraft, validateFlowMap };
 });

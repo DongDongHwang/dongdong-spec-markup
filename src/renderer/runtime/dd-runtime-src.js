@@ -120,6 +120,21 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 	.dd-print-page { break-after: page; page-break-after: always; }
 	.dd-print-page:last-child { break-after: auto; page-break-after: auto; }
 }
+/* 화면 플로우맵 페이지(읽기전용) — 🗺 플로우맵 토글 시 전면 오버레이. 노드 박스 + goScreen 간선. */
+#dd-flow-page { position: fixed; inset: 0; background: #f6f7f9; z-index: 99988; overflow: auto; display: none; }
+#dd-flow-page.dd-on { display: block; }
+#dd-flow-page .dd-fp-title { position: sticky; top: 0; padding: 10px 16px; font: 700 14px/1 Pretendard, sans-serif; color: #464f5b; background: rgba(246,247,249,.94); }
+#dd-flow-page .dd-fp-canvas { position: relative; width: 100%; height: calc(100% - 40px); min-height: 420px; }
+#dd-flow-page .dd-fp-edges { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+#dd-flow-page .dd-fp-node {
+	position: absolute; box-sizing: border-box; min-width: 96px; max-width: 200px; padding: 10px 14px;
+	background: #fff; border: 2px solid #7460D9; border-radius: 10px; text-align: center;
+	font: 700 13px/1.35 Pretendard, sans-serif; color: #1f2328; box-shadow: 0 2px 8px rgba(0,0,0,.10);
+	white-space: pre-wrap; word-break: break-word; z-index: 3;
+}
+#dd-flow-page .dd-fp-node .dd-fp-id { display: block; margin-top: 3px; font: 500 10px/1 Pretendard, sans-serif; color: #8a8f98; }
+#dd-flow-page .dd-fp-line { stroke: #7460D9; stroke-width: 2.5; fill: none; }
+#dd-flow-page .dd-fp-label { position: absolute; transform: translate(-50%,-50%); padding: 2px 7px; background: #fff; border: 1px solid #cbd0d8; border-radius: 999px; font: 600 11px/1.3 Pretendard, sans-serif; color: #464f5b; white-space: nowrap; z-index: 3; }
 `;
 
 	// 저장본 안에서 실행될 본체 — 외부 스코프 참조 없음(toString 직렬화 안전). document 만 의존.
@@ -130,8 +145,11 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		if (!dataEl) return;
 		var set;
 		try { set = JSON.parse(dataEl.textContent); } catch (e) { return; }
-		if (!set || !set.annotations || !set.annotations.length) return;
-		var anns = set.annotations;
+		if (!set) return;
+		// 주석이 하나도 없어도 flowMap(화면 플로우맵)이 있으면 렌더 진행 — 플로우맵만 있는 저장본도 유효.
+		var hasFlow = !!(set.flowMap && Array.isArray(set.flowMap.nodes) && set.flowMap.nodes.length);
+		if ((!set.annotations || !set.annotations.length) && !hasFlow) return;
+		var anns = Array.isArray(set.annotations) ? set.annotations : (set.annotations = []);
 		// spec-html 목업이면 자체 주석(area-rail·el-pin·매핑) 끄기 — dd 핀과 겹침 방지(dd 앱 clean 과 동일). 목업 좌하단 토글로 되돌릴 수 있다.
 		try { var __isSpec = (typeof APP_DATA !== 'undefined' && APP_DATA && APP_DATA.screens) || (typeof SCREENS !== 'undefined' && SCREENS); if (__isSpec) doc.body.classList.add('clean'); } catch (e) {} // 두 방언(APP_DATA·SCREENS) 모두 clean
 		// diff 상태 — 사용자 mark 우선(신규/기존), 없으면 origin 폴백. dd 앱 annotStatus 판박이.
@@ -370,6 +388,75 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 			for (var k in nodes) if (nodes.hasOwnProperty(k)) nodes[k].classList.toggle('dd-active', k === id);
 			for (var m in rows) if (rows.hasOwnProperty(m)) rows[m].classList.toggle('dd-active', m === id);
 			if (rows[id]) rows[id].scrollIntoView({ block: 'nearest' });
+		}
+
+		// ---- 화면 플로우맵 페이지(읽기전용) — set.flowMap 노드/간선이 있을 때만 flow 버튼 노출 ----
+		var flowMap = set.flowMap && Array.isArray(set.flowMap.nodes) && set.flowMap.nodes.length ? set.flowMap : null;
+		var flowPage = null, flowOn = false;
+		if (flowMap) {
+			var flowBtn = doc.createElement('button'); flowBtn.className = 'dd-p-toggle'; flowBtn.textContent = '🗺 플로우맵';
+			flowBtn.title = '화면 간 흐름도(읽기전용)';
+			headBtns.insertBefore(flowBtn, toggle);
+			flowBtn.addEventListener('click', function () {
+				flowOn = !flowOn;
+				if (!flowPage) flowPage = buildFlowPage();
+				flowPage.classList.toggle('dd-on', flowOn);
+				flowBtn.classList.toggle('dd-on', flowOn);
+				if (flowOn) layoutFlowPage();
+			});
+		}
+		function buildFlowPage() {
+			var SVGNS2 = 'http://www.w3.org/2000/svg';
+			var pg = doc.createElement('div'); pg.id = 'dd-flow-page';
+			var ttl = doc.createElement('div'); ttl.className = 'dd-fp-title'; ttl.textContent = '🗺 화면 플로우맵';
+			var cv = doc.createElement('div'); cv.className = 'dd-fp-canvas';
+			var svg = doc.createElementNS(SVGNS2, 'svg'); svg.setAttribute('class', 'dd-fp-edges');
+			cv.appendChild(svg); pg.appendChild(ttl); pg.appendChild(cv); doc.body.appendChild(pg);
+			pg._cv = cv; pg._svg = svg; pg._nodeEls = {};
+			for (var i = 0; i < flowMap.nodes.length; i++) {
+				(function (n) {
+					var el = doc.createElement('div'); el.className = 'dd-fp-node'; el.setAttribute('data-fid', n.id);
+					el.textContent = n.label || n.screenId || '(화면)';
+					if (n.screenId && n.screenId !== (n.label || '')) { var idc = doc.createElement('span'); idc.className = 'dd-fp-id'; idc.textContent = n.screenId; el.appendChild(idc); }
+					cv.appendChild(el); pg._nodeEls[n.id] = el;
+				})(flowMap.nodes[i]);
+			}
+			win.addEventListener('resize', function () { if (flowOn) layoutFlowPage(); });
+			return pg;
+		}
+		function layoutFlowPage() {
+			if (!flowPage) return;
+			var SVGNS2 = 'http://www.w3.org/2000/svg';
+			var cv = flowPage._cv, svg = flowPage._svg;
+			var W = cv.clientWidth || 1, H = Math.max(cv.clientHeight, 420);
+			for (var i = 0; i < flowMap.nodes.length; i++) {
+				var n = flowMap.nodes[i], el = flowPage._nodeEls[n.id];
+				if (el) { el.style.left = Math.round(n.x * W) + 'px'; el.style.top = Math.round(n.y * H) + 'px'; }
+			}
+			while (svg.firstChild) svg.removeChild(svg.firstChild);
+			Array.prototype.slice.call(flowPage.querySelectorAll('.dd-fp-label')).forEach(function (l) { l.parentNode.removeChild(l); });
+			svg.setAttribute('width', W); svg.setAttribute('height', H);
+			var defs = doc.createElementNS(SVGNS2, 'defs'), mk = doc.createElementNS(SVGNS2, 'marker');
+			mk.setAttribute('id', 'dd-fp-ah'); mk.setAttribute('markerWidth', '10'); mk.setAttribute('markerHeight', '8'); mk.setAttribute('refX', '7'); mk.setAttribute('refY', '3'); mk.setAttribute('orient', 'auto'); mk.setAttribute('markerUnits', 'userSpaceOnUse');
+			var hd = doc.createElementNS(SVGNS2, 'path'); hd.setAttribute('d', 'M0,0 L8,3 L0,6 Z'); hd.setAttribute('fill', '#7460D9'); mk.appendChild(hd); defs.appendChild(mk); svg.appendChild(defs);
+			function localRect(id) {
+				var el = flowPage._nodeEls[id]; if (!el) return null;
+				var cr = cv.getBoundingClientRect(), r = el.getBoundingClientRect();
+				return { left: r.left - cr.left + cv.scrollLeft, top: r.top - cr.top + cv.scrollTop, width: r.width, height: r.height };
+			}
+			for (var j = 0; j < flowMap.edges.length; j++) {
+				var e = flowMap.edges[j];
+				var ra = localRect(e.from), rb = localRect(e.to);
+				if (!ra || !rb) continue;
+				var ca = { left: ra.left + ra.width / 2, top: ra.top + ra.height / 2 };
+				var cb = { left: rb.left + rb.width / 2, top: rb.top + rb.height / 2 };
+				var p1 = edgeClip(ra, cb.left, cb.top, 3), p2 = edgeClip(rb, ca.left, ca.top, 4);
+				var ln = doc.createElementNS(SVGNS2, 'line');
+				ln.setAttribute('class', 'dd-fp-line'); ln.setAttribute('marker-end', 'url(#dd-fp-ah)');
+				ln.setAttribute('x1', p1.x); ln.setAttribute('y1', p1.y); ln.setAttribute('x2', p2.x); ln.setAttribute('y2', p2.y);
+				svg.appendChild(ln);
+				if (e.label) { var lb = doc.createElement('div'); lb.className = 'dd-fp-label'; lb.textContent = e.label; lb.style.left = ((p1.x + p2.x) / 2) + 'px'; lb.style.top = ((p1.y + p2.y) / 2) + 'px'; cv.appendChild(lb); }
+			}
 		}
 
 		// ---- 레이아웃(요소/좌표 실시간 재계산) ----

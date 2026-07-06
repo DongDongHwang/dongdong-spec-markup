@@ -168,6 +168,31 @@ app.whenReady().then(async () => {
 	})()`);
 	check('저장본 커넥터 — 화살표 렌더 + 끝점이 연결 핀 가장자리(≤30px)', cc.found === true && cc.vis === true && cc.d <= 30, JSON.stringify(cc));
 
+	console.log('== 화면 플로우맵(v6) 저장본 — 읽기전용 페이지 ==');
+	// flowMap 실은 세트로 저장본 생성 → dd 없이 브라우저에서 🗺 버튼·노드·간선 렌더 확인.
+	const set3 = DDModel.createSet('spec-html');
+	set3.flowMap = DDModel.buildFlowDraft(
+		[{ id: 'S1', name: '로그인' }, { id: 'S2', name: '약관' }, { id: 'S3', name: '완료' }],
+		[{ from: 'S1', to: 'S2', label: '시작' }, { from: 'S2', to: 'S3', label: '동의' }]
+	);
+	const saved3 = DDHtmlIO.embed(PURE, set3, runtime);
+	const saved3Path = path.join(TMP, 'saved-flow.html');
+	fs.writeFileSync(saved3Path, saved3, 'utf8');
+	await win.loadFile(saved3Path);
+	await wait(500);
+	const ff = await win.webContents.executeJavaScript(`(function(){
+		var btn=Array.prototype.slice.call(document.querySelectorAll('#dd-panel .dd-p-toggle')).find(function(b){return /플로우맵/.test(b.textContent);});
+		if(!btn) return { hasBtn:false };
+		btn.click();
+		var pg=document.getElementById('dd-flow-page');
+		var on=pg && pg.classList.contains('dd-on');
+		return { hasBtn:true, on:on, nodes: pg?pg.querySelectorAll('.dd-fp-node').length:-1,
+			edges: pg?pg.querySelectorAll('.dd-fp-line').length:-1, labels: pg?pg.querySelectorAll('.dd-fp-label').length:-1 };
+	})()`);
+	check('저장본 🗺 플로우맵 버튼 노출', ff.hasBtn === true);
+	check('플로우 페이지 토글 + 노드 3개', ff.on === true && ff.nodes === 3, JSON.stringify(ff));
+	check('간선 2개 + 라벨 2개 렌더', ff.edges === 2 && ff.labels === 2, JSON.stringify(ff));
+
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
 }).catch((e) => { console.log('SMOKE ERROR ' + (e && e.stack ? e.stack : e)); app.exit(1); });

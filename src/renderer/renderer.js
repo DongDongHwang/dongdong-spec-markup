@@ -11,6 +11,15 @@
 const docpath = document.getElementById('docpath');
 const splitBtn = document.getElementById('split-btn');
 const newWinBtn = document.getElementById('newwin-btn');
+// 플로우맵 캔버스 CSS 를 앱 셸 head 에 1회 주입(모듈이 FLOW_CSS 로 제공).
+(function injectFlowCss() {
+	if (typeof DDFlowMap === 'undefined' || document.getElementById('dd-flow-css')) return;
+	const st = document.createElement('style');
+	st.id = 'dd-flow-css';
+	st.textContent = DDFlowMap.FLOW_CSS;
+	document.head.appendChild(st);
+})();
+
 const modeBtn = document.getElementById('mode-btn'); // 편집 ↔ 읽기 단일 토글(상태 라벨 표시)
 const saveBtn = document.getElementById('save-btn');
 const panes = document.getElementById('panes');
@@ -250,12 +259,16 @@ function createTab(group) {
 	welcomeEl.innerHTML = WELCOME_HTML;
 	const frame = document.createElement('iframe');
 	frame.className = 'doc-frame hidden'; // 문서 로드 전엔 숨김(웰컴만 표시)
+	// 플로우맵 캔버스 호스트 — iframe 과 형제. 플로우 뷰일 때만 노출(목업 iframe 숨김).
+	const flowHost = document.createElement('div');
+	flowHost.className = 'flow-host hidden';
 	// sandbox 미사용 — 부모와 같은 file 오리진 유지(오버레이를 iframe 문서 내부에 주입). 네비 가드·오버레이는 load 에서.
 	frame.addEventListener('load', () => { guardIframeNav(frame); attachOverlay(tab); if (tab.docMode) ensureDocMeta(tab); applyMockupChrome(tab); renderAnnotPanel(); renderScreenNav(); });
-	contentEl.append(welcomeEl, frame);
+	contentEl.append(welcomeEl, frame, flowHost);
 	const tab = {
 		id, groupId: group.id, docPath: '', raw: '', pure: '', annotations: null, overlay: null, exists: true,
 		editMode: false, docMode: false, isAnnotated: false, dirty: false, // M3 편집 + M5.5 문서 뷰 + M6 주석본 파일 여부(저장 대상 판별) + 미저장 표시
+		flowView: false, flowHost, flow: null, // 화면 플로우맵 뷰 상태·호스트·컨트롤러(DDFlowMap)
 		contentEl, welcomeEl, frame,
 		navHistory: [], navIndex: -1,
 	};
@@ -381,6 +394,78 @@ function applyMockupChrome(tab) {
 	} catch (_) { /* iframe 접근 불가(문서 교체 중) — 무시 */ }
 }
 
+// ---- 화면 플로우맵 뷰 (v6, 안 2 복사-편집 모델) ------------------------------------------
+// goScreen 간선 파싱(초안용) — 목업 DOM 을 훑어 "화면 A 안의 요소가 goScreen('B') 를 호출" 관계를 뽑는다.
+//   best-effort — 못 뽑으면 노드만(사람이 간선 그림). 두 방언(구 APP_DATA / 신 SCREENS+data-screen) 대응.
+function parseScreenEdges(frame) {
+	let doc;
+	try { doc = frame.contentDocument; } catch (_) { return []; }
+	if (!doc || !doc.body) return [];
+	const edges = [];
+	// 각 요소에서 onclick/on* 속성의 goScreen('X') 또는 data-goto/data-target 을 읽고,
+	// 그 요소가 속한 화면 컨테이너([data-screen] 또는 .screen-XXX)를 from 으로 삼는다.
+	const clickers = doc.querySelectorAll('[onclick],[data-goto],[data-target],[data-screen-to]');
+	clickers.forEach((el) => {
+		let to = el.getAttribute('data-goto') || el.getAttribute('data-target') || el.getAttribute('data-screen-to') || '';
+		if (!to) {
+			const oc = el.getAttribute('onclick') || '';
+			const m = oc.match(/go(?:to)?screen\s*\(\s*['"]([^'"]+)['"]/i);
+			if (m) to = m[1];
+		}
+		if (!to) return;
+		const fromEl = el.closest('[data-screen]');
+		let from = fromEl ? fromEl.getAttribute('data-screen') : '';
+		if (!from) { // 구 방언 — .screen-XXX 컨테이너
+			const sc = el.closest('[class*="screen-"]');
+			if (sc) { const mm = (sc.className || '').match(/screen-([A-Za-z0-9_-]+)/); if (mm) from = mm[1]; }
+		}
+		if (from && to) edges.push({ from, to, label: '' });
+	});
+	return edges;
+}
+
+// 플로우맵 초안 보장 — flowMap 이 없고 편집 모드면 화면 목록 + goScreen 간선으로 초안 생성(1회).
+//   화면 개념 없는 목업이면 빈 flowMap(노드 0) — 사람이 직접 못 그리므로 안내만.
+function ensureFlowDraft(tab) {
+	if (!tab.annotations) tab.annotations = DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
+	if (tab.annotations.flowMap) return;
+	const screens = DDOverlay.readScreens(tab.frame);
+	const screenEdges = parseScreenEdges(tab.frame);
+	tab.annotations.flowMap = DDModel.buildFlowDraft(screens, screenEdges);
+	if (screens.length) markDirty(tab); // 노드가 실제 생겼을 때만 더티
+}
+
+// 플로우 뷰 진입 — iframe 숨기고 캔버스 노출, 컨트롤러 부착.
+function enterFlowView(tab) {
+	if (!tab || !tab.docPath) return;
+	if (tab.editMode) ensureFlowDraft(tab); // 편집 진입 시 초안 자동(없을 때만)
+	else if (!tab.annotations || !tab.annotations.flowMap) tab.annotations = tab.annotations || DDModel.createSet(DDOverlay.detectSpecHtml(tab.frame) ? 'spec-html' : 'generic');
+	tab.flowView = true;
+	if (tab.flow) { tab.flow.detach(); tab.flow = null; }
+	tab.flow = DDFlowMap.attach(tab.flowHost, tab.annotations, {
+		editable: tab.editMode,
+		onChange: () => { markDirty(tab); },
+	});
+	renderTabView(tab);
+	applyMockupChrome(tab);
+	renderScreenNav();
+	syncTopbar();
+}
+// 플로우 뷰 이탈 — 캔버스 접고 목업 iframe 복귀.
+function exitFlowView(tab) {
+	if (!tab) return;
+	tab.flowView = false;
+	if (tab.flow) { tab.flow.detach(); tab.flow = null; }
+	renderTabView(tab);
+	renderScreenNav();
+	syncTopbar();
+}
+function toggleFlowView() {
+	const tab = activeTab();
+	if (!tab || !tab.docPath) return;
+	if (tab.flowView) exitFlowView(tab); else enterFlowView(tab);
+}
+
 // 트레이 칩 클릭 — 숨은 주석의 화면으로 이동 + 선택. spec-html(screenId)은 goScreen 브리지로 전환 가능,
 //   generic(screenSel)은 목업 자체 토글이라 프로그램 전환 불가 → 안내만.
 function navToAnnotation(tab, id) {
@@ -490,6 +575,11 @@ function setMode(tab, mode) {
 	if (tab.overlay) tab.overlay.setEditable(edit);
 	else attachOverlay(tab); // 오버레이 미부착(빈 주석 등)이면 새로 시도
 	if (sel && tab.overlay) tab.overlay.select(sel); // 선택 복원 — DEL·하이라이트가 모드 왕복 후에도 동작
+	if (tab.flowView && tab.flow) { // 플로우 뷰 중 모드 전환 — 캔버스 편집성 반영(편집이면 초안 보장)
+		if (edit) ensureFlowDraft(tab);
+		tab.flow.setEditable(edit);
+		tab.flow.rebuild();
+	}
 	applyMockupChrome(tab); // dd-docview(문서 뷰 전용 숨김) 토글 반영
 	syncTopbar();
 }
@@ -529,11 +619,13 @@ function showTab(group, tabId) {
 	if (group.id === activeGroupId) syncTopbar();
 }
 
-// 문서 유무로 웰컴/iframe 전환.
+// 문서 유무로 웰컴/iframe/플로우 캔버스 전환. 플로우 뷰면 iframe 숨기고 캔버스 노출.
 function renderTabView(tab) {
 	const hasDoc = !!tab.docPath;
-	tab.frame.classList.toggle('hidden', !hasDoc);
+	const flow = hasDoc && tab.flowView;
+	tab.frame.classList.toggle('hidden', !hasDoc || flow);
 	tab.welcomeEl.classList.toggle('hidden', hasDoc);
+	if (tab.flowHost) tab.flowHost.classList.toggle('hidden', !flow);
 }
 
 // 탭 제목 — 파일명(확장자 제거), 빈 문서는 '새 문서'.
@@ -1119,6 +1211,29 @@ function renderScreenNav() {
 	const cur = (tab && tab.docPath) ? DDOverlay.curScreen(tab.frame) : null;
 	const set = tab.annotations;
 	screenList.innerHTML = '';
+	// 최상단 — 🗺 화면 플로우맵 (화면 흐름도 페이지 진입/이탈 토글). 화면이 있는 목업에서만 노출.
+	{
+		const fli = document.createElement('li');
+		fli.className = 'recent-item';
+		const frow = document.createElement('div');
+		// screen-row 클래스는 화면 전용(네비 카운트·클릭 테스트가 셀렉트) — 플로우 행은 flow-nav-row 로 분리.
+		frow.className = 'tree-row flow-nav-row' + (tab.flowView ? ' is-active' : '');
+		frow.title = '화면 간 흐름도 — 노드 드래그·간선 긋기(편집)';
+		const fi = document.createElement('span'); fi.className = 'ti'; fi.textContent = '🗺';
+		const fn = document.createElement('span'); fn.className = 'tn'; fn.textContent = '화면 플로우맵';
+		frow.append(fi, fn);
+		const fmap = set && set.flowMap;
+		if (fmap && Array.isArray(fmap.nodes) && fmap.nodes.length) {
+			const badge = document.createElement('span');
+			badge.className = 'screen-count';
+			badge.textContent = String(fmap.nodes.length);
+			badge.title = '플로우 노드 ' + fmap.nodes.length + '개';
+			frow.appendChild(badge);
+		}
+		frow.addEventListener('click', () => toggleFlowView());
+		fli.appendChild(frow);
+		screenList.appendChild(fli);
+	}
 	for (const s of screens) {
 		const cnt = set && Array.isArray(set.annotations)
 			? set.annotations.filter((a) => a.anchor && a.anchor.screenId === s.id).length : 0;
@@ -1142,7 +1257,7 @@ function renderScreenNav() {
 			row.appendChild(badge);
 		}
 		li.appendChild(row);
-		row.addEventListener('click', () => DDOverlay.gotoScreen(tab.frame, s.id)); // 목업 화면 전환 → onScreenChange 가 나머지 처리
+		row.addEventListener('click', () => { if (tab.flowView) exitFlowView(tab); DDOverlay.gotoScreen(tab.frame, s.id); }); // 플로우 뷰였으면 목업 복귀 후 화면 전환
 		screenList.appendChild(li);
 	}
 }

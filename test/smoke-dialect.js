@@ -73,7 +73,7 @@ app.whenReady().then(async () => {
 		window.alert=function(){};
 		var tab=window.activeTab(); var w=tab.frame.contentWindow, d=tab.frame.contentDocument;
 		return { ok:true,
-			navRows: document.querySelectorAll('#screen-list .tree-row').length,
+			navRows: document.querySelectorAll('#screen-list .screen-row').length, // 화면 행만(플로우맵 nav 행은 .flow-nav-row 로 분리)
 			clean: d.body.classList.contains('clean'),
 			cur0: String(w.eval('STATE.cur')),
 			winGo:(typeof w.goScreen), evalGo:String(w.eval('typeof goScreen'))

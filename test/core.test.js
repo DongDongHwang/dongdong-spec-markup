@@ -36,9 +36,10 @@ test('model: genId 형식 + rng 주입 재현성', () => {
 
 test('model: createSet 기본값 + source.kind 방어', () => {
 	const s = DDModel.createSet('spec-html');
-	assert.strictEqual(s.ddVersion, DDModel.DD_VERSION); // v5 — 커넥터(connect) 도입
+	assert.strictEqual(s.ddVersion, DDModel.DD_VERSION); // v6 — 플로우맵 도입
 	assert.strictEqual(s.source.kind, 'spec-html');
 	assert.strictEqual(s.docMeta, null); // 정책부 미추출 상태 — 저장 시 목업에서 채움
+	assert.strictEqual(s.flowMap, null); // 플로우맵 미생성 상태
 	assert.deepStrictEqual(s.annotations, []);
 	assert.strictEqual(DDModel.createSet('이상한값').source.kind, 'generic');
 });
@@ -465,6 +466,51 @@ test('model: 커넥터(Phase 4) — connect 스키마·검증·arrow 전용', ()
 	old.annotations.push(oldAr);
 	const mig = DDModel.migrate(old);
 	assert.strictEqual(mig.ddVersion, DDModel.DD_VERSION);
+	assert.strictEqual(DDModel.validateSet(mig).ok, true);
+});
+
+test('model: 플로우맵(v6) — 노드 그리드 배치·간선 매핑·검증·migrate', () => {
+	const screens = [{ id: 'S1', name: '홈' }, { id: 'S2', name: '로그인' }, { id: 'S3', name: '완료' }, { id: 'S4', name: '오류' }];
+	// 노드 자동 배치 — 화면 수만큼, 좌표 0~1, screenId·label 스냅샷
+	const nodes = DDModel.layoutFlowNodes(screens, { cols: 2 });
+	assert.strictEqual(nodes.length, 4);
+	assert.ok(nodes.every((n) => n.x >= 0 && n.x <= 1 && n.y >= 0 && n.y <= 1), '좌표 0~1');
+	assert.strictEqual(nodes[0].screenId, 'S1');
+	assert.strictEqual(nodes[0].label, '홈');
+	// 2열 배치 — 0,1 같은 행(y 동일) / 2,3 다음 행(y 더 큼)
+	assert.strictEqual(nodes[0].y, nodes[1].y);
+	assert.ok(nodes[2].y > nodes[0].y);
+	assert.strictEqual(nodes[0].x, nodes[2].x); // 같은 열
+	// 빈 목록 → 빈 배열
+	assert.deepStrictEqual(DDModel.layoutFlowNodes([]), []);
+	// 초안 조립 — 화면 간선(screenId 쌍)을 노드 id 간선으로 매핑. 양끝 노드 없거나 자기연결·중복은 버림.
+	const draft = DDModel.buildFlowDraft(screens, [
+		{ from: 'S1', to: 'S2', label: '로그인 시작' },
+		{ from: 'S2', to: 'S3', label: '성공' },
+		{ from: 'S2', to: 'S4', label: '실패' },
+		{ from: 'S1', to: 'S1' },                  // 자기연결 — 버림
+		{ from: 'S1', to: 'S9' },                  // S9 노드 없음 — 버림
+		{ from: 'S1', to: 'S2', label: '로그인 시작' }, // 중복 — 버림
+	], { cols: 2 });
+	assert.strictEqual(draft.nodes.length, 4);
+	assert.strictEqual(draft.edges.length, 3, '유효 간선 3개만');
+	assert.ok(draft.edges.every((e) => draft.nodes.some((n) => n.id === e.from) && draft.nodes.some((n) => n.id === e.to)), '간선 양끝 = 실재 노드 id');
+	assert.strictEqual(draft.edges[0].origin, 'draft');
+	// 세트에 flowMap 실어 검증 통과
+	const s = DDModel.createSet('spec-html');
+	s.flowMap = draft;
+	assert.strictEqual(DDModel.validateSet(s).ok, true);
+	// 간선 from 이 실재 노드 아님 → 검증 실패
+	const bad = DDModel.createSet('spec-html');
+	bad.flowMap = { nodes: [DDModel.createFlowNode({ screenId: 'S1', x: 0.1, y: 0.1 })], edges: [DDModel.createFlowEdge({ from: 'fn_ghost', to: 'fn_ghost2' })] };
+	assert.strictEqual(DDModel.validateSet(bad).ok, false);
+	// flowMap=null 은 통과(옵셔널)
+	assert.strictEqual(DDModel.validateFlowMap(null).length, 0);
+	// migrate v5(flowMap 키 없음) → v6, flowMap=null 로 채움
+	const v5 = { ddVersion: 5, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, docMeta: null, annotations: [] };
+	const mig = DDModel.migrate(v5);
+	assert.strictEqual(mig.ddVersion, DDModel.DD_VERSION);
+	assert.strictEqual(mig.flowMap, null);
 	assert.strictEqual(DDModel.validateSet(mig).ok, true);
 });
 

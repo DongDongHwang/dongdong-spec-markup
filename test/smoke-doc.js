@@ -84,6 +84,26 @@ body{margin:0;font-family:sans-serif}.pg{padding:40px}.pg:not(.on){display:none}
 <script>function showPage(i){var ps=document.querySelectorAll('.pg');for(var k=0;k<ps.length;k++)ps[k].classList.toggle('on',k===i);}</script>
 </body></html>`;
 
+// 플로우맵 목업 — APP_DATA.screens 3개 + data-screen 컨테이너 + onclick goScreen(간선 파싱용).
+//   화면 플로우맵 초안(노드=화면, 간선=goScreen)·편집·저장 왕복 검증.
+const FLOW_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+body{margin:0;font-family:sans-serif}.screen{width:360px;margin:20px auto}.screen:not(.active){display:none}
+.btn{display:inline-block;padding:10px 16px;border:1px solid #7460D9;border-radius:8px;margin:8px;cursor:pointer}
+</style></head><body>
+<div class="screen active" id="screen-F1" data-screen="F1">
+  <div class="btn" onclick="goScreen('F2')">로그인하기</div>
+</div>
+<div class="screen" id="screen-F2" data-screen="F2">
+  <div class="btn" onclick="goScreen('F3')">완료</div>
+  <div class="btn" onclick="goScreen('F1')">뒤로</div>
+</div>
+<div class="screen" id="screen-F3" data-screen="F3">완료 화면</div>
+<script>
+const APP_DATA = { currentScreen:"F1", screens:{ F1:{id:"F1",name:"로그인"}, F2:{id:"F2",name:"약관동의"}, F3:{id:"F3",name:"완료"} } };
+function goScreen(id){ if(!APP_DATA.screens[id]) return; APP_DATA.currentScreen=id; document.querySelectorAll('.screen').forEach(function(s){ s.classList.toggle('active', s.getAttribute('data-screen')===id); }); }
+</script>
+</body></html>`;
+
 // 롱스크롤 목업 — 화면 전환 없이 세로로 긴 단일 페이지. 핀이 스크롤을 따라 콘텐츠에 붙어 이동하는지 검증.
 const LONGSCROLL_HTML = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
 body{margin:0;font-family:sans-serif}.sec{padding:40px;border-bottom:1px solid #eee}
@@ -99,12 +119,14 @@ const longPath = path.join(TMP, 'longscroll.html');
 const genPath = path.join(TMP, 'generic.html');
 const adminPath = path.join(TMP, 'admin.html');
 const adminNewPath = path.join(TMP, 'admin-new.html');
+const flowPath = path.join(TMP, 'flow-like.html');
 fs.writeFileSync(specPath, SPEC_HTML, 'utf8');
 fs.writeFileSync(storyPath, STORY_MULTI_HTML, 'utf8');
 fs.writeFileSync(longPath, LONGSCROLL_HTML, 'utf8');
 fs.writeFileSync(genPath, GENERIC_HTML, 'utf8');
 fs.writeFileSync(adminPath, ADMIN_HTML, 'utf8');
 fs.writeFileSync(adminNewPath, ADMIN_NEW_HTML, 'utf8');
+fs.writeFileSync(flowPath, FLOW_HTML, 'utf8');
 
 // headless 안정화 — 무거운 목업 로드 시 네트워크서비스 크래시·hang 방지(메모리 기록).
 const { app, BrowserWindow } = require('electron');
@@ -516,6 +538,105 @@ app.whenReady().then(async () => {
 		return { had:had, from: arrow.connect?arrow.connect.from:null, vis: node && node.style.display !== 'none' };
 	})()`);
 	check('대상 핀 삭제 — connect 자가 해제 + 폴백 앵커로 렌더 유지', ch.had === true && ch.from === null && ch.vis === true, 'from=' + ch.from + ' vis=' + ch.vis);
+
+	console.log('== 화면 플로우맵 (v6, 안 2 자동초안+확정편집) ==');
+	// 플로우 목업 로드(3화면 + goScreen 간선). 편집 켜고 플로우 뷰 진입 → 초안 자동 생성.
+	await wc.executeJavaScript(`(async function(){ window.alert=function(){};window.confirm=function(){return true;}; await window.loadDocIntoTab(window.activeTab(), ${JSON.stringify(flowPath)}, {history:false}); return true; })()`);
+	await wait(700);
+	const fd = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		if(!tab.editMode) window.toggleEdit();       // 편집 모드
+		window.toggleFlowView();                     // 플로우 뷰 진입 → ensureFlowDraft
+		var fm=tab.annotations.flowMap;
+		var host=tab.flowHost;
+		return {
+			view: tab.flowView===true,
+			hostVisible: host && !host.classList.contains('hidden'),
+			iframeHidden: tab.frame.classList.contains('hidden'),
+			nodes: fm?fm.nodes.length:-1,
+			edges: fm?fm.edges.length:-1,
+			nodeEls: host.querySelectorAll('.flow-node').length,
+			edgeEls: host.querySelectorAll('.flow-edge').length,
+			navActive: !!document.querySelector('.flow-nav-row.is-active')
+		};
+	})()`);
+	check('플로우 뷰 진입 — 캔버스 노출·iframe 숨김', fd.view && fd.hostVisible && fd.iframeHidden, JSON.stringify(fd));
+	check('초안 노드 = 화면 3개 자동 배치', fd.nodes === 3 && fd.nodeEls === 3, 'nodes=' + fd.nodes + ' els=' + fd.nodeEls);
+	check('초안 간선 = goScreen 파싱(F1→F2, F2→F3, F2→F1) 3개', fd.edges === 3 && fd.edgeEls === 3, 'edges=' + fd.edges + ' els=' + fd.edgeEls);
+	check('좌측 네비 플로우맵 항목 활성', fd.navActive === true);
+	// 노드 드래그 → x,y 비율 갱신
+	const fdrag = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); var host=tab.flowHost;
+		var n0=tab.annotations.flowMap.nodes[0];
+		var before={x:n0.x,y:n0.y};
+		var el=host.querySelector('.flow-node[data-flow-id="'+n0.id+'"]');
+		var r=el.getBoundingClientRect();
+		var sx=Math.round(r.left+8), sy=Math.round(r.top+8);
+		el.dispatchEvent(new MouseEvent('mousedown',{clientX:sx,clientY:sy,button:0,bubbles:true}));
+		document.dispatchEvent(new MouseEvent('mousemove',{clientX:sx+120,clientY:sy+90,button:0,bubbles:true}));
+		document.dispatchEvent(new MouseEvent('mouseup',{clientX:sx+120,clientY:sy+90,button:0,bubbles:true}));
+		return { before:before, after:{x:n0.x,y:n0.y}, moved:(n0.x!==before.x||n0.y!==before.y) };
+	})()`);
+	check('노드 드래그 — x,y 비율 갱신', fdrag.moved === true, JSON.stringify(fdrag));
+	// 간선 추가 — 노드3(F3, 간선 없던)의 포트에서 노드1로 드래그 → 새 간선
+	const fedge = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); var host=tab.flowHost; var fm=tab.annotations.flowMap;
+		var before=fm.edges.length;
+		var n3=fm.nodes[2], n1=fm.nodes[0];
+		tab.flow.relayout();
+		var el3=host.querySelector('.flow-node[data-flow-id="'+n3.id+'"]');
+		var el1=host.querySelector('.flow-node[data-flow-id="'+n1.id+'"]');
+		var port=el3.querySelector('.flow-port');
+		var pr=port.getBoundingClientRect(), t=el1.getBoundingClientRect();
+		var sx=Math.round(pr.left+8), sy=Math.round(pr.top+8);
+		var tx=Math.round(t.left+t.width/2), ty=Math.round(t.top+t.height/2);
+		port.dispatchEvent(new MouseEvent('mousedown',{clientX:sx,clientY:sy,button:0,bubbles:true}));
+		document.dispatchEvent(new MouseEvent('mousemove',{clientX:tx,clientY:ty,button:0,bubbles:true}));
+		document.dispatchEvent(new MouseEvent('mouseup',{clientX:tx,clientY:ty,button:0,bubbles:true}));
+		var last=fm.edges[fm.edges.length-1];
+		return { added: fm.edges.length===before+1, from:last&&last.from===n3.id, to:last&&last.to===n1.id, origin:last&&last.origin };
+	})()`);
+	check('간선 추가 — 포트 드래그로 F3→F1 새 간선', fedge.added && fedge.from && fedge.to, JSON.stringify(fedge));
+	check('추가 간선 origin=manual', fedge.origin === 'manual', 'origin=' + fedge.origin);
+	// 노드 삭제 → 연결 간선 동반 삭제
+	const fdel = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); var fm=tab.annotations.flowMap;
+		var n2=fm.nodes[1]; // F2 — 간선 여러 개 연결
+		var edgesTouching=fm.edges.filter(function(e){return e.from===n2.id||e.to===n2.id;}).length;
+		tab.flow.rebuild();
+		// 선택 후 삭제(컨트롤러 API)
+		var host=tab.flowHost;
+		var el=host.querySelector('.flow-node[data-flow-id="'+n2.id+'"]');
+		el.dispatchEvent(new MouseEvent('mousedown',{clientX:el.getBoundingClientRect().left+8,clientY:el.getBoundingClientRect().top+8,button:0,bubbles:true}));
+		document.dispatchEvent(new MouseEvent('mouseup',{clientX:el.getBoundingClientRect().left+8,clientY:el.getBoundingClientRect().top+8,button:0,bubbles:true}));
+		var ok=tab.flow.deleteSelected();
+		var nodeGone=!fm.nodes.some(function(n){return n.id===n2.id;});
+		var edgesGone=!fm.edges.some(function(e){return e.from===n2.id||e.to===n2.id;});
+		return { touched:edgesTouching, nodeGone:nodeGone, edgesGone:edgesGone };
+	})()`);
+	check('노드 삭제 — 연결 간선 동반 삭제', fdel.nodeGone && fdel.edgesGone && fdel.touched > 0, JSON.stringify(fdel));
+	// 저장 왕복 — flowMap 이 저장본에 실리고 재개봉 시 복원되는지(embed/extract)
+	const fsave = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab(); var set=tab.annotations;
+		var runtime={css:window.DDRuntimeSrc.RUNTIME_CSS, js:window.DDRuntimeSrc.RUNTIME_JS};
+		var saved=window.DDHtmlIO.embed(tab.pure||tab.raw, set, runtime);
+		var ex=window.DDHtmlIO.extract(saved);
+		var mig=window.DDModel.migrate(ex.set);
+		return {
+			hasFlow: !!(mig.flowMap && Array.isArray(mig.flowMap.nodes)),
+			nodes: mig.flowMap?mig.flowMap.nodes.length:-1,
+			edges: mig.flowMap?mig.flowMap.edges.length:-1,
+			valid: window.DDModel.validateSet(mig).ok
+		};
+	})()`);
+	check('저장 왕복 — flowMap 저장본에 실림·복원·검증', fsave.hasFlow && fsave.valid && fsave.nodes >= 2, JSON.stringify(fsave));
+	// 플로우 뷰 이탈 → 목업 복귀
+	const fexit = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		window.toggleFlowView();
+		return { view: tab.flowView, iframeShown: !tab.frame.classList.contains('hidden'), hostHidden: tab.flowHost.classList.contains('hidden') };
+	})()`);
+	check('플로우 뷰 이탈 — 목업 iframe 복귀', fexit.view === false && fexit.iframeShown && fexit.hostHidden, JSON.stringify(fexit));
 
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
