@@ -373,12 +373,42 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 		}
 
 		// ---- 레이아웃(요소/좌표 실시간 재계산) ----
+		// 커넥터(Phase 4) — 대상 렉트 중심→상대점 방향 테두리 교점(+pad). 상대점이 렉트 안이면 그대로(역전 방지).
+		function edgeClip(rect, tox, toy, pad) {
+			var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+			var dx = tox - cx, dy = toy - cy, dist = Math.sqrt(dx * dx + dy * dy);
+			if (dist === 0) return { x: cx, y: cy };
+			var hw = rect.width / 2, hh = rect.height / 2;
+			var tx = dx !== 0 ? hw / Math.abs(dx) : Infinity, ty = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+			var t = Math.min(tx, ty);
+			if (!isFinite(t) || t >= 1) return { x: tox, y: toy };
+			t = Math.min(1, t + (pad || 0) / dist);
+			return { x: cx + dx * t, y: cy + dy * t };
+		}
+		// 커넥터 끝점 해석 — 연결 대상 주석 노드가 보이면 그 렉트(따라감), 대상 숨김이면 hide, 아니면 자유 앵커.
+		function arrowEnd(a, key, anchor, coord) {
+			var cid = a.connect && a.connect[key];
+			if (cid) {
+				var found = false;
+				for (var k = 0; k < anns.length; k++) if (anns[k].id === cid) { found = true; break; }
+				if (found) {
+					var n = nodes[cid];
+					if (!n || n.style.display === 'none') return { hide: true };
+					var r = n.getBoundingClientRect();
+					return { rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+				}
+				// 대상 없음(비정상 저장본) — 자유 앵커 폴백
+			}
+			var p = ptOf(anchor, coord);
+			return p ? { pt: p } : { hide: true };
+		}
 		var lastScreen; // 직전 화면 — 바뀌면 문서 뷰 목록을 현재 화면 기준으로 재렌더
 		function layout() {
 			if (!doc.body || !doc.getElementById('dd-overlay-root')) return;
 			var rootRect = root.getBoundingClientRect();
 			var screen = curScreen();
 			if (screen !== lastScreen) { lastScreen = screen; if (docMode) renderList(); }
+			var arrows = []; // 화살표는 2차 패스 — 커넥터가 대상(핀·박스) 이번 프레임 위치를 읽어야 해서 뒤로 미룬다
 			for (var i = 0; i < anns.length; i++) {
 				var a = anns[i], node = nodes[a.id];
 				if (!node) continue;
@@ -386,15 +416,7 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 				var gated = false;
 				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true;
 				else if (a.anchor && a.anchor.screenSel && !renderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic 화면 컨테이너 숨김
-				if (a.type === 'arrow') { // 화살표 — 두 끝점 라인(별도 배치)
-					var ap1 = gated ? null : ptOf(a.anchor, a.coord), ap2 = gated ? null : ptOf(a.anchor2, a.coord2);
-					if (!ap1 || !ap2) { node.style.display = 'none'; continue; }
-					node.style.display = ''; node.setAttribute('width', rootRect.width); node.setAttribute('height', rootRect.height);
-					node.style.width = rootRect.width + 'px'; node.style.height = rootRect.height + 'px';
-					var lns = node.getElementsByTagName('line');
-					for (var li = 0; li < lns.length; li++) { lns[li].setAttribute('x1', ap1.x - rootRect.left); lns[li].setAttribute('y1', ap1.y - rootRect.top); lns[li].setAttribute('x2', ap2.x - rootRect.left); lns[li].setAttribute('y2', ap2.y - rootRect.top); }
-					continue;
-				}
+				if (a.type === 'arrow') { arrows.push({ a: a, node: node, gated: gated }); continue; }
 				if (gated) {
 					abs = null;
 				} else if (a.anchor && a.anchor.mode === 'element') {
@@ -416,6 +438,22 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 				node.style.left = (abs.left - rootRect.left) + 'px';
 				node.style.top = (abs.top - rootRect.top) + 'px';
 				if (a.type === 'box') { node.style.width = Math.max(0, abs.width) + 'px'; node.style.height = Math.max(0, abs.height) + 'px'; }
+			}
+			// 2차 패스 — 화살표. 커넥터 끝점은 대상 노드 렉트 가장자리에 스냅(대상이 움직이면 따라감).
+			for (var j = 0; j < arrows.length; j++) {
+				var ar = arrows[j], an = ar.a, nd = ar.node;
+				if (ar.gated) { nd.style.display = 'none'; continue; }
+				var e1 = arrowEnd(an, 'from', an.anchor, an.coord), e2 = arrowEnd(an, 'to', an.anchor2, an.coord2);
+				if (e1.hide || e2.hide) { nd.style.display = 'none'; continue; }
+				var c1 = e1.rect ? { x: e1.rect.left + e1.rect.width / 2, y: e1.rect.top + e1.rect.height / 2 } : e1.pt;
+				var c2 = e2.rect ? { x: e2.rect.left + e2.rect.width / 2, y: e2.rect.top + e2.rect.height / 2 } : e2.pt;
+				var ap1 = e1.rect ? edgeClip(e1.rect, c2.x, c2.y, 4) : e1.pt;
+				var ap2 = e2.rect ? edgeClip(e2.rect, c1.x, c1.y, 4) : e2.pt;
+				if (!ap1 || !ap2) { nd.style.display = 'none'; continue; }
+				nd.style.display = ''; nd.setAttribute('width', rootRect.width); nd.setAttribute('height', rootRect.height);
+				nd.style.width = rootRect.width + 'px'; nd.style.height = rootRect.height + 'px';
+				var lns = nd.getElementsByTagName('line');
+				for (var li = 0; li < lns.length; li++) { lns[li].setAttribute('x1', ap1.x - rootRect.left); lns[li].setAttribute('y1', ap1.y - rootRect.top); lns[li].setAttribute('x2', ap2.x - rootRect.left); lns[li].setAttribute('y2', ap2.y - rootRect.top); }
 			}
 		}
 		var pending = false;

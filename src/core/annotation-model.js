@@ -10,7 +10,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
 	'use strict';
 
-	const DD_VERSION = 4;               // v4 — 문서 메타(docMeta: 표지·History·개요·플로우) 도입. v1~v3 은 migrate 로 승격.
+	const DD_VERSION = 5;               // v5 — 커넥터(arrow.connect{from,to}) 도입. v4 = docMeta. v1~v4 는 migrate 로 승격.
 	const TOOL_NAME = 'dd-spec-viewer';
 	const TYPES = ['pin', 'box', 'text', 'arrow']; // text·arrow = 번호 없는 캔버스 요소(시퀀스·계층 제외). arrow = 두 끝점(anchor+anchor2)
 	const ANCHOR_MODES = ['element', 'coord'];
@@ -102,6 +102,10 @@
 			coord: p.coord || null,     // { basis:'frame'|'body', x, y, w?, h? }  (mode='coord' 전용)
 			anchor2: p.anchor2 || null, // 화살표 끝점 앵커(arrow 전용) — start=anchor, end=anchor2
 			coord2: p.coord2 || null,   // 화살표 끝점 coord(arrow + end 가 coord 모드)
+			// 커넥터(Phase 4, arrow 전용) — 끝점이 다른 주석(핀·박스·텍스트)에 스냅되면 그 id.
+			//   from=시작점, to=끝점. null=자유 끝점(anchor/coord 가 위치 소유). 연결되면 렌더는 대상 노드를 따라간다.
+			//   anchor/coord 는 연결 중에도 폴백으로 유지 — 대상 삭제 시 마지막 자유 위치로 자가 복귀.
+			connect: (type === 'arrow' && p.connect) ? { from: p.connect.from || null, to: p.connect.to || null } : null,
 			style: p.style || { variant: 'solid', color: '#7460D9' },
 			body: p.body || { format: 'html', html: '', plain: '' },
 			slots: p.slots || null,
@@ -193,6 +197,13 @@
 			if (!ANCHOR_MODES.includes(m2)) errs.push(`${at}.anchor2.mode: ${ANCHOR_MODES.join('|')} 필수(arrow 끝점)`);
 			else if (m2 === 'element') { if (typeof a.anchor2.elementId !== 'string' || !a.anchor2.elementId) errs.push(`${at}.anchor2.elementId: element 끝점 필수`); }
 			else { const c2 = a.coord2; if (!c2 || !isPosRatio(c2.x) || !isPosRatio(c2.y)) errs.push(`${at}.coord2: coord 끝점 x/y 비율 필수`); }
+			if (a.connect != null) { // 커넥터 — 있을 때만 형태 검증(옵셔널). from/to = 주석 id 문자열|null.
+				if (typeof a.connect !== 'object') errs.push(`${at}.connect: 객체|null 이어야 함`);
+				else {
+					if (a.connect.from != null && typeof a.connect.from !== 'string') errs.push(`${at}.connect.from: 문자열|null`);
+					if (a.connect.to != null && typeof a.connect.to !== 'string') errs.push(`${at}.connect.to: 문자열|null`);
+				}
+			}
 		}
 		if (a.mark != null) { // 있을 때만 형태 검증(미지정 null 은 통과)
 			if (typeof a.mark !== 'object') errs.push(`${at}.mark: 객체여야 함`);

@@ -138,6 +138,36 @@ app.whenReady().then(async () => {
 	check('S2 설명표 1행', rp.s2desc === 1, 's2desc=' + rp.s2desc);
 	check('조립 후 원래 화면(S2) 복귀', rp.curRestored === 'S2', 'cur=' + rp.curRestored);
 
+	console.log('== 커넥터(Phase 4) 저장본 — 연결 화살표 팔로잉 ==');
+	// 별도 저장본(기존 케이스 개수 무영향) — S1 핀 2개 + 핀1→핀2 connect 화살표. dd 없이 브라우저 런타임만으로
+	// 화살표 끝점이 연결 핀 "가장자리"에 스냅되는지, 대상 핀 노드 기준 거리로 검사한다.
+	const set2 = DDModel.createSet('spec-html');
+	DDNumbering.add(set2, DDModel.createAnnotation({ type: 'pin', anchor: { mode: 'element', elementId: 'S1-EL-001', screenId: 'S1' }, body: { format: 'html', html: '<p>A</p>', plain: 'A' } }));
+	DDNumbering.add(set2, DDModel.createAnnotation({ type: 'pin', anchor: { mode: 'element', elementId: 'S1-EL-002', screenId: 'S1' }, body: { format: 'html', html: '<p>B</p>', plain: 'B' } }));
+	const cpFrom = set2.annotations[0].id, cpTo = set2.annotations[1].id;
+	DDNumbering.add(set2, DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'element', elementId: 'S1-EL-001', screenId: 'S1' },
+		anchor2: { mode: 'element', elementId: 'S1-EL-002' },
+		connect: { from: cpFrom, to: cpTo },
+	}));
+	const saved2 = DDHtmlIO.embed(PURE, set2, runtime);
+	const saved2Path = path.join(TMP, 'saved-connect.html');
+	fs.writeFileSync(saved2Path, saved2, 'utf8');
+	await win.loadFile(saved2Path);
+	await wait(600);
+	const cc = await win.webContents.executeJavaScript(`(function(){
+		var pinB=document.querySelector('#dd-overlay-root [data-dd-id="${cpTo}"]');
+		var ar=document.querySelector('#dd-overlay-root svg.dd-arrow') || document.querySelector('#dd-overlay-root .dd-arrow');
+		if(!pinB||!ar) return { found:false };
+		var ln=ar.querySelector('.dd-arrow-line');
+		var rr=document.getElementById('dd-overlay-root').getBoundingClientRect();
+		var r=pinB.getBoundingClientRect(); var cx=r.left+r.width/2, cy=r.top+r.height/2;
+		var x2=parseFloat(ln.getAttribute('x2'))+rr.left, y2=parseFloat(ln.getAttribute('y2'))+rr.top;
+		return { found:true, vis: ar.style.display!=='none', d: Math.round(Math.hypot(x2-cx,y2-cy)) };
+	})()`);
+	check('저장본 커넥터 — 화살표 렌더 + 끝점이 연결 핀 가장자리(≤30px)', cc.found === true && cc.vis === true && cc.d <= 30, JSON.stringify(cc));
+
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
 }).catch((e) => { console.log('SMOKE ERROR ' + (e && e.stack ? e.stack : e)); app.exit(1); });

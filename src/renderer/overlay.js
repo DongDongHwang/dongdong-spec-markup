@@ -63,6 +63,8 @@ const DDOverlay = (() => {
 /* 드래그 중 앵커 예측 — 요소에 붙음(초록·따라감) / 좌표에 고정(회색 점선) */
 #${ROOT_ID}.dd-editing .dd-will-element { outline: 3px solid rgba(24,165,88,.75); outline-offset: 3px; }
 #${ROOT_ID}.dd-editing .dd-will-coord { outline: 3px dashed rgba(107,114,128,.85); outline-offset: 3px; }
+/* 커넥터 스냅 힌트(Phase 4) — 화살표 끝점을 놓으면 이 주석에 연결됨(보라 실선) */
+#${ROOT_ID}.dd-editing .dd-connect-hint { outline: 3px solid rgba(116,96,217,.85); outline-offset: 3px; }
 /* 캔버스 텍스트(B 1단계) — 번호 없는 텍스트 박스. 좌상단 앵커(transform none). */
 #${ROOT_ID} .dd-text {
 	position: absolute; transform: none; max-width: 240px; padding: 4px 8px; box-sizing: border-box;
@@ -441,10 +443,36 @@ body.clean #screen-nav { display: none !important; }
 			}
 			return null;
 		}
+		// 커넥터 끝점 해석(Phase 4) — connect id 가 살아있는 주석이면 그 노드의 현재 렉트(스냅·따라감).
+		//   { rect } = 연결됨 / { pt } = 자유 끝점 / { hide:true } = 해석 불가(대상 게이팅·자유 앵커도 없음).
+		//   대상 주석이 삭제됐으면 connect 를 자가 해제하고 자유 앵커로 폴백(자가 치유).
+		function resolveArrowEnd(a, key, anchor, coord) {
+			const cid = a.connect && a.connect[key];
+			if (cid) {
+				if (!annotations().some((x) => x.id === cid)) {
+					a.connect[key] = null; // 대상 삭제됨 — 연결 해제(다음 저장에 반영)
+				} else {
+					const n = nodes.get(cid);
+					if (!n || n.style.display === 'none') return { hide: true }; // 대상 숨김(다른 화면 등) — 화살표도 숨김
+					const r = n.getBoundingClientRect();
+					return { rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+				}
+			}
+			const p = pointOf(anchor, coord);
+			return p ? { pt: p } : { hide: true };
+		}
 		// 화살표 배치 — root 전체 SVG 안에서 두 끝점 라인 갱신. 해석 불가(끝점 없음)면 숨김.
+		//   연결 끝점은 대상 렉트 "가장자리"에 붙는다(edgeClipPoint) — 대상이 움직이면 매 layout 따라감.
+		//   ⚠ 연결 대상 노드 렉트를 읽으므로 반드시 비-화살표 배치가 끝난 2차 패스에서 호출할 것.
 		function layoutArrow(node, a, rootRect) {
-			const p1 = pointOf(a.anchor, a.coord);
-			const p2 = pointOf(a.anchor2, a.coord2);
+			const e1 = resolveArrowEnd(a, 'from', a.anchor, a.coord);
+			const e2 = resolveArrowEnd(a, 'to', a.anchor2, a.coord2);
+			if (e1.hide || e2.hide) { node.style.display = 'none'; return false; }
+			const c1 = e1.rect ? { x: e1.rect.left + e1.rect.width / 2, y: e1.rect.top + e1.rect.height / 2 } : e1.pt;
+			const c2 = e2.rect ? { x: e2.rect.left + e2.rect.width / 2, y: e2.rect.top + e2.rect.height / 2 } : e2.pt;
+			const CONNECT_PAD = 4; // 테두리에서 살짝 띄움(화살촉 여백)
+			const p1 = e1.rect ? (() => { const q = DDAnchor.edgeClipPoint(e1.rect, { left: c2.x, top: c2.y }, CONNECT_PAD); return { x: q.left, y: q.top }; })() : e1.pt;
+			const p2 = e2.rect ? (() => { const q = DDAnchor.edgeClipPoint(e2.rect, { left: c1.x, top: c1.y }, CONNECT_PAD); return { x: q.left, y: q.top }; })() : e2.pt;
 			if (!p1 || !p2) { node.style.display = 'none'; return false; }
 			node.style.display = '';
 			node.setAttribute('width', rootRect.width); node.setAttribute('height', rootRect.height);
@@ -465,6 +493,7 @@ body.clean #screen-nav { display: none !important; }
 			const screen = currentScreen();
 			if (screen !== lastScreen) { lastScreen = screen; if (opts.onScreenChange) opts.onScreenChange(screen); }
 			const hidden = [];
+			const arrows = []; // 화살표는 2차 패스 — 커넥터가 대상(핀·박스) "이번 프레임" 위치를 읽어야 해서 뒤로 미룬다
 			let visible = 0;
 			for (const a of annotations()) {
 				const node = nodes.get(a.id);
@@ -474,9 +503,8 @@ body.clean #screen-nav { display: none !important; }
 				let gated = false;
 				if (a.anchor && a.anchor.screenId && screen && a.anchor.screenId !== screen) gated = true; // spec-html 다른 화면
 				else if (a.anchor && a.anchor.screenSel && !isRenderable(doc.querySelector(a.anchor.screenSel))) gated = true; // generic — 소속 화면 컨테이너가 지금 안 보임
-				if (a.type === 'arrow') { // 화살표는 두 끝점 라인(별도 배치). 게이팅 시 숨김·트레이.
-					if (gated || !layoutArrow(node, a, rootRect)) { node.style.display = 'none'; hidden.push({ id: a.id, label: '↗' }); }
-					else visible++;
+				if (a.type === 'arrow') { // 화살표는 두 끝점 라인(별도 배치·2차 패스). 게이팅 시 숨김·트레이.
+					arrows.push({ a, node, gated });
 					continue;
 				}
 				if (gated) {
@@ -514,6 +542,11 @@ body.clean #screen-nav { display: none !important; }
 				}
 				visible++;
 			}
+			// 2차 패스 — 화살표. 커넥터(connect)가 대상 노드의 방금 배치된 렉트를 읽어 가장자리에 스냅.
+			for (const it of arrows) {
+				if (it.gated || !layoutArrow(it.node, it.a, rootRect)) { it.node.style.display = 'none'; hidden.push({ id: it.a.id, label: '↗' }); }
+				else visible++;
+			}
 			// 숨은 주석 트레이 — 화면 전환·조건분기로 빠진 핀을 보존 중임을 알린다(돌아오면 자동 복귀)
 			if (hidden.length) {
 				tray.style.display = '';
@@ -547,6 +580,25 @@ body.clean #screen-nav { display: none !important; }
 				if (hit) return hit; // 실제 매치에서만 종료 — 오버레이·비앵커 래퍼는 건너뛴다
 			}
 			return null;
+		}
+
+		// 커넥터 스냅 대상(Phase 4) — 포인트 아래의 다른 주석(핀·박스·텍스트) id. 화살표끼리는 연결 불가.
+		function annotationAt(x, y, excludeId) {
+			const stack = doc.elementsFromPoint ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
+			for (const el of stack) {
+				if (!el || !root.contains(el)) continue; // 오버레이 레이어 안만 본다
+				const dd = el.closest ? el.closest('.dd-pin, .dd-box, .dd-text') : null;
+				if (dd && dd.dataset.ddId && dd.dataset.ddId !== excludeId) return dd.dataset.ddId;
+			}
+			return null;
+		}
+		// 커넥터 스냅 힌트 — 지금 놓으면 연결될 주석에 보라 테두리. id=null 이면 해제.
+		let connectHintId = null;
+		function setConnectHint(id) {
+			if (id === connectHintId) return;
+			if (connectHintId) { const prev = nodes.get(connectHintId); if (prev) prev.classList.remove('dd-connect-hint'); }
+			connectHintId = id || null;
+			if (connectHintId) { const cur = nodes.get(connectHintId); if (cur) cur.classList.add('dd-connect-hint'); }
 		}
 
 		// coord 기준 선택 — 폰 프레임이 있으면 항상 frame 비율(밖의 여백 핀도 프레임에 매여 함께 이동).
@@ -642,10 +694,13 @@ body.clean #screen-nav { display: none !important; }
 			notifyChange();
 		}
 		// 화살표 생성 — 시작(x1,y1)·끝(x2,y2) 각각 포인트 앵커 자동판정(요소/좌표).
+		//   끝점이 다른 주석 위면 커넥터(connect) 스냅 — 이후 그 주석을 따라간다. anchor/coord 는 폴백으로 함께 저장.
 		function createArrow(x1, y1, x2, y2) {
 			const s = pinAnchorAt(x1, y1);
 			const e2 = pinAnchorAt(x2, y2);
-			const a = DDModel.createAnnotation({ type: 'arrow', anchor: s.anchor, coord: s.coord, anchor2: e2.anchor, coord2: e2.coord });
+			const from = annotationAt(x1, y1, null);
+			const to = annotationAt(x2, y2, null);
+			const a = DDModel.createAnnotation({ type: 'arrow', anchor: s.anchor, coord: s.coord, anchor2: e2.anchor, coord2: e2.coord, connect: (from || to) ? { from, to } : null });
 			DDNumbering.add(set, a);
 			rebuildNodes();
 			layout();
@@ -705,11 +760,13 @@ body.clean #screen-nav { display: none !important; }
 			if (!a) return;
 			const node = nodes.get(a.id);
 			if (!node || node.style.display === 'none') return;
-			if (a.type === 'arrow') { // 화살표 — 두 끝점 함께 평행이동(중심 붕괴 방지)
+			if (a.type === 'arrow') { // 화살표 — 자유 끝점만 평행이동(연결된 끝은 대상이 위치 소유·연결 유지)
+				const conn = a.connect || {};
 				const p1 = pointOf(a.anchor, a.coord), p2 = pointOf(a.anchor2, a.coord2);
 				if (!p1 || !p2) return;
-				const h1 = pinAnchorAt(p1.x + dx, p1.y + dy), h2 = pinAnchorAt(p2.x + dx, p2.y + dy);
-				a.anchor = h1.anchor; a.coord = h1.coord; a.anchor2 = h2.anchor; a.coord2 = h2.coord;
+				if (!conn.from) { const h1 = pinAnchorAt(p1.x + dx, p1.y + dy); a.anchor = h1.anchor; a.coord = h1.coord; }
+				if (!conn.to) { const h2 = pinAnchorAt(p2.x + dx, p2.y + dy); a.anchor2 = h2.anchor; a.coord2 = h2.coord; }
+				if (conn.from && conn.to) return; // 양끝 다 연결 — 미세이동 무효
 				layout(); notifyChange();
 				return;
 			}
@@ -758,21 +815,33 @@ body.clean #screen-nav { display: none !important; }
 			}
 			e.preventDefault();
 			e.stopPropagation(); // 편집 중엔 목업 인터랙션 차단 — 화면 이동은 읽기 모드에서
-			const ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text, .dd-arrow') : null;
+			let ddEl = e.target && e.target.closest ? e.target.closest('.dd-pin, .dd-box, .dd-text, .dd-arrow') : null;
+			// 화살표 도구 중엔 핀·박스·텍스트 위에서도 "그리기 시작"(커넥터 스냅의 핵심 플로우 — 핀에서 핀으로 긋기).
+			//   기존 화살표 몸통·끝점 핸들 조정은 도구와 무관하게 유지.
+			if (tool === 'arrow' && ddEl && !ddEl.classList.contains('dd-arrow')) ddEl = null;
 			if (ddEl && ddEl.dataset.ddId) {
 				const a = annotations().find((x) => x.id === ddEl.dataset.ddId);
 				if (!a) return;
 				select(a.id);
 				if (a.type === 'arrow') { // 화살표 — 몸통 잡으면 전체 이동, 끝점 핸들 잡으면 그 끝만 재앵커
-					const p1 = pointOf(a.anchor, a.coord);
-					const p2 = pointOf(a.anchor2, a.coord2);
-					if (!p1 || !p2) { gesture = null; dragNodeId = null; return; } // 해석 불가(양끝 없음)면 선택만
+					// 시작 좌표는 "지금 렌더된" 끝점(SVG 라인)에서 읽는다 — 커넥터 스냅 위치가 pointOf(자유 앵커)와 다르므로.
+					const rr = root.getBoundingClientRect();
+					const ln = ddEl.querySelector('.dd-arrow-line');
+					const x1 = ln ? parseFloat(ln.getAttribute('x1')) : NaN, y1 = ln ? parseFloat(ln.getAttribute('y1')) : NaN;
+					const x2 = ln ? parseFloat(ln.getAttribute('x2')) : NaN, y2 = ln ? parseFloat(ln.getAttribute('y2')) : NaN;
+					if (!isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2)) { gesture = null; dragNodeId = null; return; } // 해석 불가면 선택만
 					const handle = e.target && e.target.closest ? e.target.closest('.dd-arrow-handle') : null;
+					const end = handle ? handle.dataset.ddEnd : null; // '1'|'2' 단일 끝점 / null 전체 이동
+					// 이동 마스크 — 핸들 드래그는 그 끝만. 몸통 드래그는 "자유 끝점만" 이동(연결된 끝은 대상이 위치 소유).
+					const conn = a.connect || {};
+					const m1 = end ? (end === '1' ? 1 : 0) : (conn.from ? 0 : 1);
+					const m2 = end ? (end === '2' ? 1 : 0) : (conn.to ? 0 : 1);
+					if (!m1 && !m2) { gesture = null; dragNodeId = null; return; } // 양끝 다 연결된 몸통 드래그 — 선택만
 					gesture = {
 						kind: 'arrow', a, node: ddEl, sx: e.clientX, sy: e.clientY, moved: false,
-						end: handle ? handle.dataset.ddEnd : null, // '1'|'2' 단일 끝점 / null 전체 이동
-						p1: { x: p1.x, y: p1.y }, p2: { x: p2.x, y: p2.y }, // 드래그 시작 시점의 viewport 끝점
-						rootRect: root.getBoundingClientRect(), // 드래그 동안 1회 캐시(매 move 재측정 제거)
+						end, m1, m2, // 이동 대상 끝점 마스크(커넥터 인지)
+						p1: { x: x1 + rr.left, y: y1 + rr.top }, p2: { x: x2 + rr.left, y: y2 + rr.top }, // 드래그 시작 시점의 viewport 끝점
+						rootRect: rr, // 드래그 동안 1회 캐시(매 move 재측정 제거)
 					};
 					dragNodeId = a.id;
 					return;
@@ -819,14 +888,14 @@ body.clean #screen-nav { display: none !important; }
 			const cx = g.lastX, cy = g.lastY;
 			const dx = cx - g.sx, dy = cy - g.sy;
 			const rootRect = g.rootRect;
-			if (g.kind === 'arrow') { // 화살표 이동 — 몸통(양끝) 또는 한 끝만 델타 적용
-				const m1 = (g.end === '2') ? 0 : 1, m2 = (g.end === '1') ? 0 : 1; // 이동 대상 끝점 마스크
-				const nx1 = g.p1.x - rootRect.left + dx * m1, ny1 = g.p1.y - rootRect.top + dy * m1;
-				const nx2 = g.p2.x - rootRect.left + dx * m2, ny2 = g.p2.y - rootRect.top + dy * m2;
+			if (g.kind === 'arrow') { // 화살표 이동 — 마스크(m1/m2, 커넥터 인지)가 1인 끝점에만 델타 적용
+				const nx1 = g.p1.x - rootRect.left + dx * g.m1, ny1 = g.p1.y - rootRect.top + dy * g.m1;
+				const nx2 = g.p2.x - rootRect.left + dx * g.m2, ny2 = g.p2.y - rootRect.top + dy * g.m2;
 				g.node.querySelectorAll('line').forEach((l) => { l.setAttribute('x1', nx1); l.setAttribute('y1', ny1); l.setAttribute('x2', nx2); l.setAttribute('y2', ny2); });
 				const hs = g.node.querySelectorAll('.dd-arrow-handle');
 				if (hs[0]) { hs[0].setAttribute('cx', nx1); hs[0].setAttribute('cy', ny1); }
 				if (hs[1]) { hs[1].setAttribute('cx', nx2); hs[1].setAttribute('cy', ny2); }
+				if (g.end) setConnectHint(annotationAt(cx, cy, g.a.id)); // 끝점 핸들 드래그 — 스냅 후보 힌트
 				return;
 			}
 			if (g.kind === 'resize') { // box·text 리사이즈 — dir 별 좌상단/폭/높이 재계산(최소 12px 가드)
@@ -871,6 +940,7 @@ body.clean #screen-nav { display: none !important; }
 				g.arrowPrev.svg.setAttribute('width', rootRect.width); g.arrowPrev.svg.setAttribute('height', rootRect.height);
 				g.arrowPrev.ln.setAttribute('x1', g.sx - rootRect.left); g.arrowPrev.ln.setAttribute('y1', g.sy - rootRect.top);
 				g.arrowPrev.ln.setAttribute('x2', cx - rootRect.left); g.arrowPrev.ln.setAttribute('y2', cy - rootRect.top);
+				setConnectHint(annotationAt(cx, cy, null)); // 생성 중 — 끝점 스냅 후보 힌트
 				return;
 			}
 			if (!g.rubber) {
@@ -915,20 +985,31 @@ body.clean #screen-nav { display: none !important; }
 				}
 				return;
 			}
-			if (g.kind === 'arrow') { // 화살표 드롭 — 이동한 끝점만 새 위치에서 재판정(요소↔좌표 자동)
+			if (g.kind === 'arrow') { // 화살표 드롭 — 이동한 끝점만 새 위치에서 재판정(주석 스냅 → 요소 ↔ 좌표 자동)
+				setConnectHint(null);
 				if (g.moved) {
 					const ddx = e.clientX - g.sx, ddy = e.clientY - g.sy;
-					const m1 = (g.end === '2') ? 0 : 1, m2 = (g.end === '1') ? 0 : 1;
-					const h1 = pinAnchorAt(g.p1.x + ddx * m1, g.p1.y + ddy * m1);
-					const h2 = pinAnchorAt(g.p2.x + ddx * m2, g.p2.y + ddy * m2);
-					g.a.anchor = h1.anchor; g.a.coord = h1.coord;
-					g.a.anchor2 = h2.anchor; g.a.coord2 = h2.coord;
+					if (g.m1) { // 시작점 — 다른 주석 위면 커넥터 연결, 아니면 자유 앵커(해제 포함)
+						const px = g.p1.x + ddx, py = g.p1.y + ddy;
+						const cid = annotationAt(px, py, g.a.id);
+						const h1 = pinAnchorAt(px, py);
+						g.a.anchor = h1.anchor; g.a.coord = h1.coord;
+						if (cid || (g.a.connect && g.a.connect.from)) g.a.connect = Object.assign({ from: null, to: null }, g.a.connect, { from: cid });
+					}
+					if (g.m2) { // 끝점 — 동일 재판정
+						const px = g.p2.x + ddx, py = g.p2.y + ddy;
+						const cid = annotationAt(px, py, g.a.id);
+						const h2 = pinAnchorAt(px, py);
+						g.a.anchor2 = h2.anchor; g.a.coord2 = h2.coord;
+						if (cid || (g.a.connect && g.a.connect.to)) g.a.connect = Object.assign({ from: null, to: null }, g.a.connect, { to: cid });
+					}
+					if (g.a.connect && !g.a.connect.from && !g.a.connect.to) g.a.connect = null; // 둘 다 자유면 정리
 					layout();
 					notifyChange();
 				}
 				return; // 미이동 = 선택만
 			}
-			if (g.arrowPrev) g.arrowPrev.svg.remove();
+			if (g.arrowPrev) { g.arrowPrev.svg.remove(); setConnectHint(null); } // 생성 미리보기·스냅 힌트 정리
 			if (g.rubber) g.rubber.remove();
 			if (tool === 'text') { createText(g.sx, g.sy); return; } // 텍스트 도구 — 클릭 지점(드래그 무시)에 생성
 			if (tool === 'arrow') { if (g.moved) createArrow(g.sx, g.sy, e.clientX, e.clientY); return; } // 화살표 — 드래그 시작→끝

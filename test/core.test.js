@@ -36,7 +36,7 @@ test('model: genId 형식 + rng 주입 재현성', () => {
 
 test('model: createSet 기본값 + source.kind 방어', () => {
 	const s = DDModel.createSet('spec-html');
-	assert.strictEqual(s.ddVersion, 4);
+	assert.strictEqual(s.ddVersion, DDModel.DD_VERSION); // v5 — 커넥터(connect) 도입
 	assert.strictEqual(s.source.kind, 'spec-html');
 	assert.strictEqual(s.docMeta, null); // 정책부 미추출 상태 — 저장 시 목업에서 채움
 	assert.deepStrictEqual(s.annotations, []);
@@ -130,16 +130,17 @@ test('model: mark 형태 검증 — 잘못된 kind/phase 적발, 미지정(null)
 	assert.ok(v.errors.some((e) => e.includes('mark.phase')));
 });
 
-test('model: migrate v1·v2·v3 → v4 (옛 저장본 무손실 승격 + docMeta 채움)', () => {
+test('model: migrate v1~v4 → 최신 (옛 저장본 무손실 승격 + docMeta 채움)', () => {
+	const V = DDModel.DD_VERSION; // v5 — 커넥터(connect) 도입
 	const v1 = { ddVersion: 1, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
 	const out1 = DDModel.migrate(v1);
-	assert.strictEqual(out1.ddVersion, 4);
+	assert.strictEqual(out1.ddVersion, V);
 	assert.strictEqual(out1.docMeta, null); // docMeta 없던 옛 세트 → null 로 채움
-	assert.strictEqual(DDModel.validateSet(out1).ok, true); // 승격 후 v4 스키마 통과
+	assert.strictEqual(DDModel.validateSet(out1).ok, true); // 승격 후 최신 스키마 통과
 	const v2 = { ddVersion: 2, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
-	assert.strictEqual(DDModel.migrate(v2).ddVersion, 4);
+	assert.strictEqual(DDModel.migrate(v2).ddVersion, V);
 	const v3 = { ddVersion: 3, tool: 'dd-spec-viewer', savedAt: '', source: { kind: 'generic' }, annotations: [] };
-	assert.strictEqual(DDModel.migrate(v3).ddVersion, 4);
+	assert.strictEqual(DDModel.migrate(v3).ddVersion, V);
 });
 
 test('model: migrate — generic screenId 오저장 복구(#셀렉터 → screenSel)', () => {
@@ -415,6 +416,79 @@ test('model/numbering: 화살표 타입 — 두 끝점·번호 없음·검증', 
 	const bad = DDModel.createSet('generic');
 	bad.annotations.push(DDModel.createAnnotation({ type: 'arrow', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
 	assert.strictEqual(DDModel.validateSet(bad).ok, false);
+});
+
+test('model: 커넥터(Phase 4) — connect 스키마·검증·arrow 전용', () => {
+	const s = DDModel.createSet('generic');
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pinA0', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 } }));
+	DDNumbering.add(s, DDModel.createAnnotation({ id: 'an_pinB0', anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.7, y: 0.7 } }));
+	// 양끝 연결 화살표 — connect 저장·검증 통과. anchor/coord 폴백도 함께 유지.
+	const ar = DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 },
+		anchor2: { mode: 'coord' }, coord2: { basis: 'body', x: 0.7, y: 0.7 },
+		connect: { from: 'an_pinA0', to: 'an_pinB0' },
+	});
+	assert.deepStrictEqual(ar.connect, { from: 'an_pinA0', to: 'an_pinB0' });
+	DDNumbering.add(s, ar);
+	assert.strictEqual(DDModel.validateSet(s).ok, true);
+	// 한쪽만 연결(from 만) — to 는 null 정규화
+	const half = DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.2, y: 0.2 },
+		anchor2: { mode: 'coord' }, coord2: { basis: 'body', x: 0.5, y: 0.5 },
+		connect: { from: 'an_pinA0' },
+	});
+	assert.strictEqual(half.connect.to, null);
+	// connect 는 arrow 전용 — pin 에 넘겨도 무시(null)
+	const pin = DDModel.createAnnotation({ anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.3, y: 0.3 }, connect: { from: 'an_pinA0' } });
+	assert.strictEqual(pin.connect, null);
+	// 형태 위반 — from 이 문자열|null 아님 → 검증 실패
+	const bad = DDModel.createSet('generic');
+	const badAr = DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 },
+		anchor2: { mode: 'coord' }, coord2: { basis: 'body', x: 0.5, y: 0.5 },
+	});
+	badAr.connect = { from: 123, to: null };
+	bad.annotations.push(badAr);
+	assert.strictEqual(DDModel.validateSet(bad).ok, false);
+	// migrate — connect 없는 옛 저장본(v4)도 그대로 통과 + 버전 승격
+	const old = DDModel.createSet('generic');
+	old.ddVersion = 4;
+	const oldAr = DDModel.createAnnotation({
+		type: 'arrow',
+		anchor: { mode: 'coord' }, coord: { basis: 'body', x: 0.1, y: 0.1 },
+		anchor2: { mode: 'coord' }, coord2: { basis: 'body', x: 0.5, y: 0.5 },
+	});
+	delete oldAr.connect; // 옛 스키마엔 키 자체가 없음
+	old.annotations.push(oldAr);
+	const mig = DDModel.migrate(old);
+	assert.strictEqual(mig.ddVersion, DDModel.DD_VERSION);
+	assert.strictEqual(DDModel.validateSet(mig).ok, true);
+});
+
+test('anchor: edgeClipPoint — 테두리 교점·pad·내부 상대점', () => {
+	const rect = { left: 100, top: 100, width: 40, height: 20 }; // 중심 (120, 110)
+	// 오른쪽 수평 — 우변(x=140)과 교차
+	const r = DDAnchor.edgeClipPoint(rect, { left: 200, top: 110 }, 0);
+	assert.strictEqual(Math.round(r.left), 140);
+	assert.strictEqual(Math.round(r.top), 110);
+	// 위쪽 수직 — 상변(y=100)과 교차
+	const u = DDAnchor.edgeClipPoint(rect, { left: 120, top: 10 }, 0);
+	assert.strictEqual(Math.round(u.left), 120);
+	assert.strictEqual(Math.round(u.top), 100);
+	// pad — 교점에서 상대점 방향으로 pad px 더 나감
+	const p = DDAnchor.edgeClipPoint(rect, { left: 200, top: 110 }, 6);
+	assert.strictEqual(Math.round(p.left), 146);
+	// 상대점이 렉트 내부 — 그대로 반환(역전 방지)
+	const inn = DDAnchor.edgeClipPoint(rect, { left: 125, top: 112 }, 4);
+	assert.strictEqual(inn.left, 125);
+	assert.strictEqual(inn.top, 112);
+	// 중심과 동일 — 중심 반환(0 나눗셈 가드)
+	const same = DDAnchor.edgeClipPoint(rect, { left: 120, top: 110 }, 4);
+	assert.strictEqual(same.left, 120);
+	assert.strictEqual(same.top, 110);
 });
 
 test('model: 색 SSOT — 차수별 다름·그룹색·상태색', () => {

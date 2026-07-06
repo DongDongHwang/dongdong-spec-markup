@@ -444,6 +444,79 @@ app.whenReady().then(async () => {
 	check('방향키 미세이동 — 앵커 갱신', an.changed === true);
 	check('미세이동 후 길이 유지(점 붕괴 아님)', an.len > 20, 'len=' + an.len);
 
+	console.log('== 커넥터 (Phase 4) — 핀→핀 스냅·팔로잉·해제·자가치유 ==');
+	// [스냅] 핀 2개 생성 → 화살표 도구로 핀A 중심에서 핀B 중심으로 긋기 → connect{from,to} 저장.
+	const cn = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		function ev(t,x,y){ doc.dispatchEvent(new win.MouseEvent(t,{clientX:x,clientY:y,button:0,bubbles:true})); }
+		tab.overlay.setTool('annot');
+		var e1=doc.querySelector('[data-element-id="S1-EL-001"]').getBoundingClientRect();
+		var e2=doc.querySelector('[data-element-id="S1-EL-002"]').getBoundingClientRect();
+		ev('mousedown',Math.round(e1.left+30),Math.round(e1.top+e1.height/2)); ev('mouseup',Math.round(e1.left+30),Math.round(e1.top+e1.height/2));
+		ev('mousedown',Math.round(e2.left+30),Math.round(e2.top+e2.height/2)); ev('mouseup',Math.round(e2.left+30),Math.round(e2.top+e2.height/2));
+		var pins=tab.annotations.annotations.filter(function(a){return a.type==='pin';});
+		var pA=pins[pins.length-2], pB=pins[pins.length-1];
+		window.__pA=pA.id; window.__pB=pB.id;
+		var nA=doc.querySelector('#dd-overlay-root [data-dd-id="'+pA.id+'"]').getBoundingClientRect();
+		var nB=doc.querySelector('#dd-overlay-root [data-dd-id="'+pB.id+'"]').getBoundingClientRect();
+		var ax=Math.round(nA.left+nA.width/2), ay=Math.round(nA.top+nA.height/2);
+		var bx=Math.round(nB.left+nB.width/2), by=Math.round(nB.top+nB.height/2);
+		tab.overlay.setTool('arrow');
+		ev('mousedown',ax,ay); ev('mousemove',bx,by); ev('mouseup',bx,by);
+		tab.overlay.setTool('annot');
+		var ars=tab.annotations.annotations.filter(function(a){return a.type==='arrow';});
+		var ar=ars[ars.length-1]; window.__cArrow=ar.id;
+		return { pA:pA.id, pB:pB.id, from: ar.connect?ar.connect.from:null, to: ar.connect?ar.connect.to:null };
+	})()`);
+	check('핀 위에서 화살표 그리기 시작 가능(connect.from=핀A)', cn.from === cn.pA, 'from=' + cn.from);
+	check('핀 위 드롭 — connect.to=핀B', cn.to === cn.pB, 'to=' + cn.to);
+	// [팔로잉] 핀B 를 드래그 이동 → 화살표 끝점이 핀B 새 위치(가장자리)를 따라감.
+	const cf = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var nB=doc.querySelector('#dd-overlay-root [data-dd-id="'+window.__pB+'"]');
+		var r=nB.getBoundingClientRect(); var sx=Math.round(r.left+r.width/2), sy=Math.round(r.top+r.height/2);
+		nB.dispatchEvent(new win.MouseEvent('mousedown',{clientX:sx,clientY:sy,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mousemove',{clientX:sx+90,clientY:sy+70,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:sx+90,clientY:sy+70,button:0,bubbles:true}));
+		tab.overlay.relayout();
+		var r2=nB.getBoundingClientRect(); var cx=r2.left+r2.width/2, cy=r2.top+r2.height/2;
+		var ln=doc.querySelector('#dd-overlay-root [data-dd-id="'+window.__cArrow+'"] .dd-arrow-line');
+		var rr=doc.getElementById('dd-overlay-root').getBoundingClientRect();
+		var x2=parseFloat(ln.getAttribute('x2'))+rr.left, y2=parseFloat(ln.getAttribute('y2'))+rr.top;
+		return { d: Math.round(Math.hypot(x2-cx, y2-cy)) };
+	})()`);
+	check('연결 대상 이동 — 화살표 끝점이 따라감(중심에서 가장자리 거리 ≤30px)', cf.d <= 30, 'd=' + cf.d);
+	// [해제] 끝점 핸들을 빈 여백으로 드래그 → connect.to 해제, from 유지.
+	const cd = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument, win=tab.frame.contentWindow;
+		var arrow=tab.annotations.annotations.find(function(a){return a.id===window.__cArrow;});
+		tab.overlay.select(arrow.id);
+		var node=doc.querySelector('#dd-overlay-root [data-dd-id="'+arrow.id+'"]');
+		var handles=node.querySelectorAll('.dd-arrow-handle');
+		handles[1].dispatchEvent(new win.MouseEvent('mousedown',{clientX:400,clientY:300,button:0,bubbles:true}));
+		doc.dispatchEvent(new win.MouseEvent('mousemove',{clientX:400,clientY:560,button:0,bubbles:true})); // 아래 빈 여백으로
+		doc.dispatchEvent(new win.MouseEvent('mouseup',{clientX:400,clientY:560,button:0,bubbles:true}));
+		return { from: arrow.connect?arrow.connect.from:null, to: arrow.connect?arrow.connect.to:null,
+			m2: arrow.anchor2&&arrow.anchor2.mode };
+	})()`);
+	check('끝점 빈 곳 드롭 — connect.to 해제·from 유지', cd.from === cn.pA && cd.to === null, 'from=' + cd.from + ' to=' + cd.to);
+	// [자가치유] 연결 대상 핀A 삭제 → layout 이 connect.from 자가 해제 + 폴백 앵커로 계속 렌더.
+	const ch = await wc.executeJavaScript(`(function(){
+		var tab=window.activeTab();
+		var doc=tab.frame.contentDocument;
+		var arrow=tab.annotations.annotations.find(function(a){return a.id===window.__cArrow;});
+		var had = !!(arrow.connect && arrow.connect.from);
+		var idx=tab.annotations.annotations.findIndex(function(a){return a.id===window.__pA;});
+		tab.annotations.annotations.splice(idx,1);
+		tab.overlay.refresh();
+		var node=doc.querySelector('#dd-overlay-root [data-dd-id="'+arrow.id+'"]');
+		return { had:had, from: arrow.connect?arrow.connect.from:null, vis: node && node.style.display !== 'none' };
+	})()`);
+	check('대상 핀 삭제 — connect 자가 해제 + 폴백 앵커로 렌더 유지', ch.had === true && ch.from === null && ch.vis === true, 'from=' + ch.from + ' vis=' + ch.vis);
+
 	console.log('\n' + (failed === 0 ? 'ALL PASS' : failed + ' FAILED'));
 	app.exit(failed === 0 ? 0 : 1);
 }).catch((e) => { console.log('SMOKE ERROR ' + (e && e.stack ? e.stack : e)); app.exit(1); });

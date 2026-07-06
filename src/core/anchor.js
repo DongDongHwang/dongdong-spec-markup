@@ -66,5 +66,21 @@
 		};
 	}
 
-	return { clamp01, pinPointFromElement, boxRectFromElement, rectFromCoord, coordFromPoint, offsetPctFromPoint, coordFromRect };
+	// 커넥터 끝점(Phase 4) — 대상 렉트 중심에서 상대점(toward) 방향으로 나가 테두리와 만나는 점(+pad 여백).
+	//   화살표가 연결된 핀·박스 "가장자리"에 붙게 한다. 상대점이 렉트 안이면 상대점 그대로(겹침 수용·역전 방지).
+	function edgeClipPoint(rect, toward, pad) {
+		const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+		const dx = toward.left - cx, dy = toward.top - cy;
+		const dist = Math.sqrt(dx * dx + dy * dy);
+		if (dist === 0) return { left: cx, top: cy };
+		const hw = rect.width / 2, hh = rect.height / 2;
+		const tx = dx !== 0 ? hw / Math.abs(dx) : Infinity;
+		const ty = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+		let t = Math.min(tx, ty);
+		if (!isFinite(t) || t >= 1) return { left: toward.left, top: toward.top }; // 상대점이 렉트 내부
+		t = Math.min(1, t + (pad || 0) / dist); // 테두리에서 pad px 만큼 더 띄움(화살촉 여백)
+		return { left: cx + dx * t, top: cy + dy * t };
+	}
+
+	return { clamp01, pinPointFromElement, boxRectFromElement, rectFromCoord, coordFromPoint, offsetPctFromPoint, coordFromRect, edgeClipPoint };
 });
