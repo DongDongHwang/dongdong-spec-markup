@@ -181,7 +181,8 @@ body.clean #screen-nav { display: none !important; }
 		try { return resolveAppData(frame.contentWindow); } catch (_) { return null; }
 	}
 
-	// 화면 목록 공통형 [{id,name}] — 두 방언 흡수(APP_DATA.screens 또는 SCREENS). renderer 화면 네비가 사용.
+	// 화면 목록 공통형 [{id,name,sel?}] — 세 방언 흡수. spec-html(APP_DATA.screens/SCREENS)은 {id,name},
+	//   generic(id 없는 <… data-screen>)은 {id:data-screen값, name, sel:'tag[data-screen="값"]'}(주석 screenSel·현재화면 매칭용).
 	function readScreens(frame) {
 		try {
 			const w = frame.contentWindow;
@@ -190,8 +191,38 @@ body.clean #screen-nav { display: none !important; }
 			if (src && typeof src === 'object') {
 				return Object.keys(src).map((k) => { const s = src[k] || {}; return { id: s.id || k, name: s.name || s.id || k }; }).filter((s) => s.id);
 			}
+			return readGenericScreens(frame.contentDocument); // generic — DOM data-screen 방언
 		} catch (_) { /* 접근 불가 */ }
 		return [];
+	}
+	// generic 목업 화면 흡수 — display 토글되는 [data-screen] 형제 그룹(=화면 섹션). 항상 보이는 사이드바 항목은 제외.
+	//   sel 은 detectScreenSel 이 저장하는 screenSel 과 동일 포맷이라 주석 소속·현재화면이 정확히 매칭된다.
+	function readGenericScreens(doc) {
+		if (!doc) return [];
+		const seen = {}; const out = [];
+		const cands = doc.querySelectorAll('[data-screen]');
+		for (let i = 0; i < cands.length; i++) {
+			const el = cands[i];
+			const ds = el.getAttribute('data-screen');
+			if (!ds || seen[ds]) continue;
+			const parent = el.parentElement;
+			if (!parent) continue;
+			const sibs = Array.prototype.filter.call(parent.children, (c) => c.nodeType === 1 && c.tagName === el.tagName && c.hasAttribute('data-screen'));
+			if (sibs.length < 2) continue; // 형제 그룹 아니면 화면 섹션 아님
+			const anyHidden = sibs.some((c) => c.offsetParent === null && c.getClientRects().length === 0);
+			if (!anyHidden) continue; // display 토글 안 됨(사이드바 등) → 제외
+			seen[ds] = 1;
+			out.push({ id: ds, name: genScreenName(doc, ds) || ds, sel: el.tagName.toLowerCase() + '[data-screen="' + ds + '"]' });
+		}
+		return out;
+	}
+	// generic 화면 이름 — 목업 사이드바 항목(.screen-item[data-screen])의 텍스트에서 추출. 없으면 null(→ data-screen 값 폴백).
+	function genScreenName(doc, ds) {
+		try {
+			const item = doc.querySelector('.screen-item[data-screen="' + ds + '"]');
+			if (item) { const n = item.querySelector('.si-name') || item; const t = n.textContent; return t ? t.trim().slice(0, 40) : null; }
+		} catch (_) {}
+		return null;
 	}
 
 	// 현재 화면 id (renderer 표시용) — APP_DATA.currentScreen 또는 신 방언 STATE.cur.
@@ -227,15 +258,21 @@ body.clean #screen-nav { display: none !important; }
 		const isSpec = !!(mock || screensObj); // 두 방언 통합 판별 — 화면 게이팅·tagScreen 공통 적용
 		function cssEsc(s) { return (win.CSS && win.CSS.escape) ? win.CSS.escape(s) : String(s).replace(/["\\#.:]/g, '\\$&'); }
 		// generic 목업 화면 감지 — APP_DATA 없이도 "display 토글되는 형제 그룹의 보이는 일원"을 현재 화면으로.
-		//   id 있는 컨테이너만 채택(견고). 못 찾으면 null → 게이팅 off(전부 렌더, 현행 유지). STORY 식 #screen-N 커버.
-		function detectScreenSel(el) {
-			let node = el;
+		//   안정 식별자(id 또는 data-screen) 있는 컨테이너만 채택(견고). 못 찾으면 null → 게이팅 off(전부 렌더, 현행 유지).
+		//   커버 방언 — STORY 식 #screen-N(id) + <section data-screen="…">(id 없이 속성만, switchScreen 토글식 v2.8).
+		function detectScreenSel(node0) {
+			let node = node0;
 			while (node && node !== doc.body && node.parentElement) {
 				const parent = node.parentElement;
 				const sibs = Array.prototype.filter.call(parent.children, (c) => c.nodeType === 1 && c.tagName === node.tagName);
-				if (sibs.length >= 2 && node.id) {
+				if (sibs.length >= 2) {
 					const anyHidden = sibs.some((c) => c !== node && c.offsetParent === null && c.getClientRects().length === 0);
-					if (anyHidden) return '#' + cssEsc(node.id);
+					if (anyHidden) {
+						if (node.id) return '#' + cssEsc(node.id);
+						// id 없는 data-screen 방언 — tagName+속성으로 유니크 셀렉터 폴백(사이드바 div[data-screen]와 태그로 분리)
+						const ds = node.getAttribute && node.getAttribute('data-screen');
+						if (ds) return node.tagName.toLowerCase() + '[data-screen="' + cssEsc(ds) + '"]';
+					}
 				}
 				node = parent;
 			}

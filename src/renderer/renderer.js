@@ -1208,7 +1208,8 @@ function renderScreenNav() {
 	const screens = (tab && tab.docPath) ? DDOverlay.readScreens(tab.frame) : []; // 두 방언(APP_DATA·SCREENS) 공통형
 	if (screens.length === 0) { screenSection.classList.add('hidden'); return; }
 	screenSection.classList.remove('hidden');
-	const cur = (tab && tab.docPath) ? DDOverlay.curScreen(tab.frame) : null;
+	// 현재 화면 — overlay.currentScreen() 우선(spec-html=screenId / generic=screenSel 둘 다 대응). 폴백 curScreen.
+	const cur = (tab && tab.docPath && tab.overlay) ? tab.overlay.currentScreen() : ((tab && tab.docPath) ? DDOverlay.curScreen(tab.frame) : null);
 	const set = tab.annotations;
 	screenList.innerHTML = '';
 	// 최상단 — 🗺 화면 플로우맵 (화면 흐름도 페이지 진입/이탈 토글). 화면이 있는 목업에서만 노출.
@@ -1236,11 +1237,11 @@ function renderScreenNav() {
 	}
 	for (const s of screens) {
 		const cnt = set && Array.isArray(set.annotations)
-			? set.annotations.filter((a) => a.anchor && a.anchor.screenId === s.id).length : 0;
+			? set.annotations.filter((a) => a.anchor && (a.anchor.screenId === s.id || (s.sel && a.anchor.screenSel === s.sel))).length : 0;
 		const li = document.createElement('li');
 		li.className = 'recent-item';
 		const row = document.createElement('div');
-		row.className = 'tree-row screen-row' + (s.id === cur ? ' is-active' : '');
+		row.className = 'tree-row screen-row' + ((s.id === cur || (s.sel && s.sel === cur)) ? ' is-active' : '');
 		row.title = s.id;
 		const ti = document.createElement('span');
 		ti.className = 'ti';
