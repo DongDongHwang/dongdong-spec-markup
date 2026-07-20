@@ -82,5 +82,56 @@
 		return { left: cx + dx * t, top: cy + dy * t };
 	}
 
-	return { clamp01, pinPointFromElement, boxRectFromElement, rectFromCoord, coordFromPoint, offsetPctFromPoint, coordFromRect, edgeClipPoint };
+	// 드래그 → 정사각형 렉트 — side = max(|dx|,|dy|)(Figma/PPT 관례), 시작점 기준 드래그 방향 부호 유지(4사분면 대응).
+	//   원 도구 기본 = 정원. Shift 자유 타원은 호출자가 이 함수를 건너뛴다. dx=0 등 축이 0이면 방향은 양수(우/하)로 폴백.
+	function squareFromDrag(sx, sy, cx, cy) {
+		const dx = cx - sx, dy = cy - sy;
+		const side = Math.max(Math.abs(dx), Math.abs(dy));
+		const signX = dx < 0 ? -1 : 1, signY = dy < 0 ? -1 : 1;
+		const fx = sx + signX * side, fy = sy + signY * side; // 시작점에서 드래그 방향으로 side 만큼 나간 반대 코너
+		return { left: Math.min(sx, fx), top: Math.min(sy, fy), width: side, height: side };
+	}
+
+	// 종횡비 잠금 리사이즈 — start={left,top,width,height}, dir='n'|'s'|'e'|'w'|'ne'|'nw'|'se'|'sw'.
+	//   opts={min:12, aspect}. aspect 미지정 시 start.width/start.height 에서 계산(정원은 1, 기존 타원은 그 비율 유지).
+	//   코너 = 반대 코너 고정 + 지배축(|dx| vs |dy| 큰 쪽)이 종횡비를 끌고 감.
+	//   변(n/s/e/w) = 해당 축만 사용자 드래그로 변경 + 직교축은 비율 추종(직교축 중심 유지). 최소 가드는 양축을 비율 유지하며 지킨다.
+	function resizeRectLocked(start, dir, dx, dy, opts) {
+		const o = opts || {};
+		const min = typeof o.min === 'number' ? o.min : 12;
+		const aspect = (typeof o.aspect === 'number' && o.aspect > 0)
+			? o.aspect
+			: (start.height > 0 ? start.width / start.height : 1);
+		const hasE = dir.indexOf('e') >= 0, hasW = dir.indexOf('w') >= 0;
+		const hasN = dir.indexOf('n') >= 0, hasS = dir.indexOf('s') >= 0;
+		const corner = (hasE || hasW) && (hasN || hasS);
+		// 각 축 자유 변경량(핸들 방향 부호 반영) — 프레임 자유 리사이즈와 동일 부호 규칙.
+		const wDelta = hasE ? dx : (hasW ? -dx : 0);
+		const hDelta = hasS ? dy : (hasN ? -dy : 0);
+		let width, height;
+		if (corner) {
+			if (Math.abs(dx) >= Math.abs(dy)) { width = start.width + wDelta; height = width / aspect; }
+			else { height = start.height + hDelta; width = height * aspect; }
+		} else if (hasE || hasW) {
+			width = start.width + wDelta; height = width / aspect;
+		} else {
+			height = start.height + hDelta; width = height * aspect;
+		}
+		if (width < min) { width = min; height = width / aspect; }
+		if (height < min) { height = min; width = height * aspect; }
+		let left, top;
+		if (corner) {
+			left = hasW ? (start.left + start.width - width) : start.left;
+			top = hasN ? (start.top + start.height - height) : start.top;
+		} else if (hasE || hasW) {
+			left = hasW ? (start.left + start.width - width) : start.left;
+			top = (start.top + start.height / 2) - height / 2; // 직교축(세로) 중심 유지
+		} else {
+			top = hasN ? (start.top + start.height - height) : start.top;
+			left = (start.left + start.width / 2) - width / 2; // 직교축(가로) 중심 유지
+		}
+		return { left, top, width, height };
+	}
+
+	return { clamp01, pinPointFromElement, boxRectFromElement, rectFromCoord, coordFromPoint, offsetPctFromPoint, coordFromRect, edgeClipPoint, squareFromDrag, resizeRectLocked };
 });

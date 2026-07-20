@@ -204,6 +204,13 @@
 		return a.edited ? 'modified' : 'unchanged';
 	}
 
+	// 화살표 색 — 신규 마킹이면 차수색(phaseColor), 그 외(기존·마킹 없음)는 style.color(현행 보라 폴백).
+	//   pin 의 '기존'=style.color 유지 규칙과 정합. mark 없는 옛 저장본 화살표가 1차색(초록)으로 튀는 회귀를 막는다.
+	function arrowColor(a) {
+		if (a && a.mark && a.mark.kind === '신규') return phaseColor(a.mark.phase || 1);
+		return (a && a.style && a.style.color) || '#7460D9';
+	}
+
 	// 배지 표시용 — { status, label, tooltip }. 신규 2·3차는 차수 병기, 툴팁은 날짜·사유.
 	function annotBadge(a) {
 		const status = annotStatus(a);
@@ -345,5 +352,5 @@
 		return { ok: errs.length === 0, errors: errs };
 	}
 
-	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, normalizeDocMeta, validateAnnotation, validateSet, annotStatus, annotBadge, phaseColor, statusColor, groupColorForKey, migrate, genFlowId, createFlowNode, createFlowEdge, layoutFlowNodes, buildFlowDraft, validateFlowMap };
+	return { DD_VERSION, TOOL_NAME, TYPES, ANCHOR_MODES, MARK_KINDS, PHASE_PALETTE, GROUP_PALETTE, genId, createSet, createAnnotation, normalizeDocMeta, validateAnnotation, validateSet, annotStatus, annotBadge, arrowColor, phaseColor, statusColor, groupColorForKey, migrate, genFlowId, createFlowNode, createFlowEdge, layoutFlowNodes, buildFlowDraft, validateFlowMap };
 });

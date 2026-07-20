@@ -683,8 +683,7 @@ body.ap-resizing { cursor: col-resize; user-select: none; }
 /* ---- diff 배지 (M6) — 신규/수정. 기존은 배지 없음. 목록·문서 뷰 공용 ---- */
 .st-badge { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; white-space: nowrap; }
 .st-badge.st-new { background: color-mix(in srgb, #18a558 18%, var(--bg)); color: #18a558; }
-.st-badge.st-modified { background: color-mix(in srgb, #E08600 22%, var(--bg)); color: #c26f00; }
-.st-badge.st-new.st-phase { background: color-mix(in srgb, #D97706 22%, var(--bg)); color: #b45309; } /* 신규 2·3차 — 볼트 phase 황색 */
+.st-badge.st-modified { background: color-mix(in srgb, #E08600 22%, var(--bg)); color: #E08600; }
 
 /* ---- 모달 (슬롯 편집 등) — 공용 오버레이 + 카드 ---- */
 .modal-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.4); }

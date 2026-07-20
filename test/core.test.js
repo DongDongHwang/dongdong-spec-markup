@@ -278,7 +278,7 @@ test('runtime: 직렬화 문자열에 마킹·차수 렌더 로직 포함(회귀
 	const src = DDRuntimeSrc.RUNTIME_JS;
 	assert.ok(src.includes('a.mark'), 'annStatus 가 mark 를 본다');
 	assert.ok(src.includes('dd-phase-badge'), '차수 배지 노드 생성');
-	assert.ok(DDRuntimeSrc.RUNTIME_CSS.includes('dd-ph'), 'phase 황색 CSS 포함');
+	assert.ok(DDRuntimeSrc.RUNTIME_CSS.includes('dd-phase-badge'), '차수 배지 CSS 포함(색은 인라인 소유)');
 });
 
 test('runtime: 팔레트가 core SSOT 와 일치(드리프트 가드)', () => {
@@ -544,6 +544,61 @@ test('model: 색 SSOT — 차수별 다름·그룹색·상태색', () => {
 	assert.strictEqual(typeof DDModel.groupColorForKey('an_x'), 'string');
 	assert.strictEqual(DDModel.statusColor({ mark: { kind: '신규', phase: 2 } }), DDModel.phaseColor(2)); // 신규=차수색
 	assert.strictEqual(DDModel.statusColor({ mark: { kind: '기존' } }), '#6B7280'); // 기존=회색
+});
+
+test('model: arrowColor — 무마킹 보라·style.color 유지·신규 차수색·기존 현행색', () => {
+	// 마킹 없음 → 현행 보라(회귀 방지 — 기존 저장본 화살표가 초록으로 안 튐)
+	assert.strictEqual(DDModel.arrowColor({}), '#7460D9');
+	assert.strictEqual(DDModel.arrowColor({ style: {} }), '#7460D9');
+	// style.color 지정 시 그 색 유지
+	assert.strictEqual(DDModel.arrowColor({ style: { color: '#123456' } }), '#123456');
+	// 신규 = 차수색(phaseColor 와 일치) — 1차·2차
+	assert.strictEqual(DDModel.arrowColor({ mark: { kind: '신규', phase: 1 } }), DDModel.phaseColor(1));
+	assert.strictEqual(DDModel.arrowColor({ mark: { kind: '신규', phase: 2 } }), DDModel.phaseColor(2));
+	assert.strictEqual(DDModel.arrowColor({ mark: { kind: '신규' } }), DDModel.phaseColor(1)); // phase 없으면 1차
+	// 기존 마킹 = style.color(없으면 보라) 유지 — 신규만 상태색 따라감
+	assert.strictEqual(DDModel.arrowColor({ mark: { kind: '기존' }, style: { color: '#7460D9' } }), '#7460D9');
+	assert.strictEqual(DDModel.arrowColor({ mark: { kind: '기존' }, style: { color: '#abcdef' } }), '#abcdef');
+});
+
+test('anchor: squareFromDrag — 4사분면·지배축(정원 잠금)', () => {
+	// 우하(Q4) dx 지배 — side=|dx|
+	assert.deepStrictEqual(DDAnchor.squareFromDrag(0, 0, 100, 40), { left: 0, top: 0, width: 100, height: 100 });
+	// 우하 dy 지배 — side=|dy|
+	assert.deepStrictEqual(DDAnchor.squareFromDrag(0, 0, 30, 80), { left: 0, top: 0, width: 80, height: 80 });
+	// 좌상(Q2) — 시작점 기준 좌상 방향으로 정사각형
+	assert.deepStrictEqual(DDAnchor.squareFromDrag(100, 100, 40, 30), { left: 30, top: 30, width: 70, height: 70 });
+	// 우상(Q1)
+	assert.deepStrictEqual(DDAnchor.squareFromDrag(0, 100, 50, 20), { left: 0, top: 20, width: 80, height: 80 });
+	// 좌하(Q3)
+	assert.deepStrictEqual(DDAnchor.squareFromDrag(100, 0, 20, 50), { left: 20, top: 0, width: 80, height: 80 });
+});
+
+test('anchor: resizeRectLocked — 코너·변·최소가드·aspect 유지', () => {
+	const sq = { left: 0, top: 0, width: 100, height: 100 }; // aspect 1(정원)
+	// se 코너 — NW 고정, dx 지배로 폭·높이 동반 확대
+	assert.deepStrictEqual(DDAnchor.resizeRectLocked(sq, 'se', 40, 20), { left: 0, top: 0, width: 140, height: 140 });
+	// nw 코너 — SE 고정, 좌상단이 위·왼쪽으로 이동(확대)
+	assert.deepStrictEqual(DDAnchor.resizeRectLocked(sq, 'nw', -40, -30), { left: -40, top: -40, width: 140, height: 140 });
+	// e 변 — 폭 변경 + 세로 비율 추종, 세로 중심 유지(center=50)
+	const e = DDAnchor.resizeRectLocked(sq, 'e', 50, 0);
+	assert.strictEqual(e.width, 150);
+	assert.strictEqual(e.height, 150);
+	assert.strictEqual(e.top + e.height / 2, 50); // 직교축 중심 유지
+	assert.strictEqual(e.left, 0);
+	// 최소 가드(12px) — 과한 축소도 양축 12 이상
+	const min = DDAnchor.resizeRectLocked(sq, 'se', -200, -100);
+	assert.strictEqual(min.width, 12);
+	assert.strictEqual(min.height, 12);
+	// aspect 2:1 유지 — se 코너 dx 지배
+	const rect = { left: 0, top: 0, width: 200, height: 100 }; // aspect 2
+	const r = DDAnchor.resizeRectLocked(rect, 'se', 100, 10);
+	assert.strictEqual(r.width / r.height, 2);
+	assert.strictEqual(r.width, 300);
+	assert.strictEqual(r.height, 150);
+	// aspect 명시 opts 우선
+	const a = DDAnchor.resizeRectLocked(sq, 'se', 60, 0, { aspect: 2 });
+	assert.strictEqual(a.width / a.height, 2);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

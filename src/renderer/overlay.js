@@ -41,15 +41,12 @@ const DDOverlay = (() => {
 #${ROOT_ID} .dd-box.dd-st-modified { border-color: #E08600; }
 #${ROOT_ID} .dd-box.dd-st-new .dd-box-label { background: #18a558; }
 #${ROOT_ID} .dd-box.dd-st-modified .dd-box-label { background: #E08600; }
-/* 신규 2·3차 — 볼트 phase.css 황색 언어(#D97706). dd-st-new 뒤에 둬 우선. */
-#${ROOT_ID} .dd-pin.dd-ph { background: #D97706; }
-#${ROOT_ID} .dd-box.dd-ph { border-color: #D97706; }
-#${ROOT_ID} .dd-box.dd-ph .dd-box-label { background: #D97706; }
+/* 신규 2·3차 색은 인라인(applyPinColor·phaseColor)이 항상 소유 — CSS 기본색을 두지 않는다(과거 #D97706 하드코딩이 차수색을 덮던 사문 제거). */
 #${ROOT_ID} .dd-phase-badge {
 	position: absolute; top: -8px; right: -8px;
 	min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
 	display: flex; align-items: center; justify-content: center;
-	background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px;
+	background: #6B7280; color: #fff; border: 1.5px solid #fff; border-radius: 999px; /* 기본색 중립 — 실제 색은 인라인 phaseColor 가 소유 */
 	font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none;
 }
 #${ROOT_ID} .dd-date-cap {
@@ -389,7 +386,7 @@ body.clean #screen-nav { display: none !important; }
 				el = doc.createElementNS(SVGNS, 'svg');
 				el.setAttribute('class', 'dd-arrow');
 				el.style.position = 'absolute'; el.style.left = '0'; el.style.top = '0'; el.style.overflow = 'visible'; el.style.pointerEvents = 'none';
-				const col = (a.style && a.style.color) || '#7460D9';
+				const col = DDModel.arrowColor(a); // 색 SSOT — 신규 마킹=차수색, 그 외(기존·무마킹)=style.color(보라). 선+화살촉(head fill) 동시 반영.
 				const mid = 'ah-' + a.id;
 				const defs = doc.createElementNS(SVGNS, 'defs');
 				const marker = doc.createElementNS(SVGNS, 'marker');
@@ -403,6 +400,12 @@ body.clean #screen-nav { display: none !important; }
 				const h1 = doc.createElementNS(SVGNS, 'circle'); h1.setAttribute('class', 'dd-arrow-handle'); h1.setAttribute('r', '6'); h1.dataset.ddEnd = '1';
 				const h2 = doc.createElementNS(SVGNS, 'circle'); h2.setAttribute('class', 'dd-arrow-handle'); h2.setAttribute('r', '6'); h2.dataset.ddEnd = '2';
 				el.appendChild(hitL); el.appendChild(visL); el.appendChild(h1); el.appendChild(h2);
+				if (a.mark && a.mark.kind) { // 마킹된 화살표 — 배지 라벨 + 날짜·사유 툴팁(핀 포맷 재사용). 무마킹은 툴팁 없음(색·배지 미부여와 정합).
+					const b = DDModel.annotBadge(a);
+					const tip = [b.tooltip ? '[' + b.label + ']  ' + b.tooltip : '[' + b.label + ']'];
+					if (a.body && a.body.plain) tip.push(a.body.plain);
+					el.title = tip.join('\n');
+				}
 			} else {
 				el = doc.createElement('div');
 				el.className = 'dd-pin';
@@ -914,6 +917,7 @@ body.clean #screen-nav { display: none !important; }
 			if (!gesture.moved && Math.abs(dx) < DRAG_MIN && Math.abs(dy) < DRAG_MIN) return;
 			gesture.moved = true;
 			gesture.lastX = e.clientX; gesture.lastY = e.clientY; // 최신 좌표만 저장 — DOM 갱신은 rAF 프레임당 1회
+			gesture.shift = e.shiftKey; // 원 도구 정원 잠금 해제(자유 타원)·원 리사이즈 비율 해제 — rAF 프레임에서 읽음
 			if (!gesture.raf) gesture.raf = win.requestAnimationFrame(applyDragFrame);
 		}
 		// rAF 배칭 — 마지막 포인터 좌표로 이동/리사이즈/러버밴드를 프레임당 1회만 갱신(이벤트 폭주 → 레이아웃 thrash 제거).
@@ -937,6 +941,16 @@ body.clean #screen-nav { display: none !important; }
 			}
 			if (g.kind === 'resize') { // box·text 리사이즈 — dir 별 좌상단/폭/높이 재계산(최소 12px 가드)
 				const s = g.start, dir = g.dir, MIN = 12;
+				if (g.a.type === 'box' && g.a.style && g.a.style.shape === 'ellipse' && !g.shift) {
+					// 원(타원) 리사이즈 — 시작 rect 종횡비 유지(새 정원은 1:1, 기존 저장 타원은 그 비율 유지). Shift 면 아래 자유 로직.
+					//   aspect 는 g.start(w/h)에서 자동 계산하므로 캐시 불필요. 좌표는 viewport 기준 → rootRect 보정만.
+					const rr = DDAnchor.resizeRectLocked(s, dir, dx, dy, { min: MIN });
+					g.node.style.left = (rr.left - rootRect.left) + 'px';
+					g.node.style.top = (rr.top - rootRect.top) + 'px';
+					g.node.style.width = rr.width + 'px';
+					g.node.style.height = rr.height + 'px';
+					return;
+				}
 				let left = s.left, top = s.top, width = s.width, height = s.height;
 				if (dir.indexOf('e') >= 0) width = s.width + dx;
 				if (dir.indexOf('s') >= 0) height = s.height + dy;
@@ -985,12 +999,14 @@ body.clean #screen-nav { display: none !important; }
 				g.rubber.className = 'dd-rubber' + (tool === 'ellipse' ? ' dd-rubber-ellipse' : '');
 				root.appendChild(g.rubber);
 			}
-			const left = Math.min(g.sx, cx);
-			const top = Math.min(g.sy, cy);
-			g.rubber.style.left = (left - rootRect.left) + 'px';
-			g.rubber.style.top = (top - rootRect.top) + 'px';
-			g.rubber.style.width = Math.abs(dx) + 'px';
-			g.rubber.style.height = Math.abs(dy) + 'px';
+			// 원 도구 기본 = 정원 잠금(러버밴드 미리보기 = 확정 결과 보장 — 둘 다 squareFromDrag 경유). Shift = 자유 타원. 사각(주석) 도구는 항상 자유.
+			const rb = (tool === 'ellipse' && !g.shift)
+				? DDAnchor.squareFromDrag(g.sx, g.sy, cx, cy)
+				: { left: Math.min(g.sx, cx), top: Math.min(g.sy, cy), width: Math.abs(dx), height: Math.abs(dy) };
+			g.rubber.style.left = (rb.left - rootRect.left) + 'px';
+			g.rubber.style.top = (rb.top - rootRect.top) + 'px';
+			g.rubber.style.width = rb.width + 'px';
+			g.rubber.style.height = rb.height + 'px';
 		}
 		function onMouseUp(e) {
 			if (!editable || !gesture) return;
@@ -1051,11 +1067,11 @@ body.clean #screen-nav { display: none !important; }
 			if (tool === 'text') { createText(g.sx, g.sy); return; } // 텍스트 도구 — 클릭 지점(드래그 무시)에 생성
 			if (tool === 'arrow') { if (g.moved) createArrow(g.sx, g.sy, e.clientX, e.clientY); return; } // 화살표 — 드래그 시작→끝
 			if (g.moved) {
-				const left = Math.min(g.sx, e.clientX);
-				const top = Math.min(g.sy, e.clientY);
-				const w = Math.abs(e.clientX - g.sx);
-				const h = Math.abs(e.clientY - g.sy);
-				if (w >= DRAG_MIN && h >= DRAG_MIN) createBox({ left, top, width: w, height: h }, tool === 'ellipse' ? 'ellipse' : 'rect');
+				// 원 도구 정원 잠금 확정 = 러버밴드 미리보기와 같은 함수 경유(미리보기=결과 보장). Shift·사각 도구는 자유 rect.
+				const rect = (tool === 'ellipse' && !e.shiftKey)
+					? DDAnchor.squareFromDrag(g.sx, g.sy, e.clientX, e.clientY)
+					: { left: Math.min(g.sx, e.clientX), top: Math.min(g.sy, e.clientY), width: Math.abs(e.clientX - g.sx), height: Math.abs(e.clientY - g.sy) };
+				if (rect.width >= DRAG_MIN && rect.height >= DRAG_MIN) createBox(rect, tool === 'ellipse' ? 'ellipse' : 'rect');
 			} else {
 				if (tool === 'ellipse') return; // 원 도구는 드래그 전용(클릭 무시)
 				createPin(g.sx, g.sy);

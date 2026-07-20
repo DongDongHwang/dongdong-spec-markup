@@ -40,14 +40,12 @@
 #dd-overlay-root .dd-box.dd-st-new { border-color: #18a558; }
 #dd-overlay-root .dd-box.dd-st-modified { border-color: #E08600; }
 #dd-overlay-root .dd-box.dd-st-new .dd-box-label, #dd-overlay-root .dd-box.dd-st-modified .dd-box-label { background: inherit; }
-#dd-overlay-root .dd-pin.dd-ph { background: #D97706; }
-#dd-overlay-root .dd-box.dd-ph { border-color: #D97706; }
-#dd-overlay-root .dd-box.dd-ph .dd-box-label { background: #D97706; }
-#dd-overlay-root .dd-phase-badge { position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #D97706; color: #fff; border: 1.5px solid #fff; border-radius: 999px; font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; }
+/* 신규 2·3차 색은 인라인(phaseCol)이 항상 소유 — CSS 기본색을 두지 않는다(과거 #D97706 하드코딩이 차수색을 덮던 사문 제거). */
+#dd-overlay-root .dd-phase-badge { position: absolute; top: -8px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #6B7280; color: #fff; border: 1.5px solid #fff; border-radius: 999px; font: 700 8px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; }
 #dd-overlay-root .dd-date-cap { position: absolute; left: 50%; top: calc(100% + 3px); transform: translateX(-50%); white-space: nowrap; font: 600 9px/1 Pretendard, -apple-system, sans-serif; pointer-events: none; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
 #dd-panel .dd-p-badge { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; margin-right: 4px; align-self: flex-start; }
 #dd-panel .dd-p-badge.dd-b-new { background: rgba(24,165,88,.15); color: #18a558; }
-#dd-panel .dd-p-badge.dd-b-modified { background: rgba(224,134,0,.2); color: #c26f00; }
+#dd-panel .dd-p-badge.dd-b-modified { background: rgba(224,134,0,.2); color: #E08600; }
 #dd-panel .dd-p-mark { font-size: 10.5px; font-weight: 600; margin-top: 3px; }
 #dd-panel {
 	position: fixed; right: 14px; top: 14px; bottom: 14px; width: 300px; z-index: 99992;
@@ -268,12 +266,13 @@ body.dd-doc-mode.clean #screen-nav, body.dd-doc-mode.clean .wf-nav { display: re
 						el = doc.createElementNS(SVGNS, 'svg'); el.setAttribute('class', 'dd-arrow');
 						el.style.position = 'absolute'; el.style.left = '0'; el.style.top = '0'; el.style.overflow = 'visible'; el.style.pointerEvents = 'none';
 						el.setAttribute('data-dd-id', a.id);
-						var acol = (a.style && a.style.color) || '#7460D9', amid = 'ah-' + a.id;
+						var acol = (a.mark && a.mark.kind === '신규') ? phaseCol(a.mark.phase || 1) : ((a.style && a.style.color) || '#7460D9'), amid = 'ah-' + a.id; // 색 SSOT 판박이 — 신규=차수색, 그 외=style.color(보라). 선+화살촉 동시.
 						var adefs = doc.createElementNS(SVGNS, 'defs'), amk = doc.createElementNS(SVGNS, 'marker');
 						amk.setAttribute('id', amid); amk.setAttribute('markerWidth', '10'); amk.setAttribute('markerHeight', '8'); amk.setAttribute('refX', '7'); amk.setAttribute('refY', '3'); amk.setAttribute('orient', 'auto'); amk.setAttribute('markerUnits', 'userSpaceOnUse');
 						var ahd = doc.createElementNS(SVGNS, 'path'); ahd.setAttribute('d', 'M0,0 L8,3 L0,6 Z'); ahd.setAttribute('fill', acol); amk.appendChild(ahd); adefs.appendChild(amk); el.appendChild(adefs);
 						var aln = doc.createElementNS(SVGNS, 'line'); aln.setAttribute('class', 'dd-arrow-line'); aln.setAttribute('stroke', acol); aln.setAttribute('stroke-width', '2.5'); aln.setAttribute('marker-end', 'url(#' + amid + ')'); aln.style.pointerEvents = 'stroke'; aln.style.cursor = 'pointer';
 						el.appendChild(aln);
+						if (a.mark && a.mark.kind) { var atip = annTip(a); el.title = atip ? '[' + annBadgeLabel(a) + '] ' + atip : '[' + annBadgeLabel(a) + ']'; } // 마킹된 화살표 툴팁(pin 판박이)
 						el.style.display = 'none';
 						el.addEventListener('click', function (e) { e.stopPropagation(); selectAnn(a.id); });
 						root.appendChild(el); nodes[a.id] = el;
